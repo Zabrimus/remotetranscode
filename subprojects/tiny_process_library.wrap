@@ -1,0 +1,10 @@
+[wrap-file]
+directory = tiny-process-library-4bf0e59e64f18d3080a1ce4e853775de2181e993
+source_url = https://gitlab.com/eidheim/tiny-process-library/-/archive/4bf0e59e64f18d3080a1ce4e853775de2181e993/tiny-process-library-4bf0e59e64f18d3080a1ce4e853775de2181e993.tar.gz
+source_filename = tiny-process-library-4bf0e59e64f18d3080a1ce4e853775de2181e993.tar.gz
+source_hash = d317b4ddabec5e01db3e98c23df2ea84b0d618f4aeff2d97a93a2d4bdd0a2ad6
+patch_directory = tiny-process-library-4bf0e59e64f18d3080a1ce4e853775de2181e993
+wrapdb_version = 4bf0e59
+
+[provide]
+tiny_process_library = tiny_process_library_dep
