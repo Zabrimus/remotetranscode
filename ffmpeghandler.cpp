@@ -134,7 +134,10 @@ void FFmpegHandler::stopVideo() {
     }
 
     if (readerThread != nullptr) {
-        readerThread->join();
+        if (readerThread->joinable()) {
+            readerThread->join();
+        }
+        delete readerThread;
         readerThread = nullptr;
     }
 

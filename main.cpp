@@ -101,7 +101,9 @@ void startHttpServer(std::string tIp, int tPort) {
         } else {
             INFO("Stop streamId {}", streamId);
 
-            handler[streamId]->stopVideo();
+            if (handler[streamId] != nullptr) {
+                handler[streamId]->stopVideo();
+            }
 
             {
                 std::lock_guard<std::mutex> guard(handlerMutex);
