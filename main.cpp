@@ -12,7 +12,7 @@ int transcoderPort;
 httplib::Server transcodeServer;
 
 std::map<std::string, FFmpegHandler*> handler;
-std::mutex handlerMutex;
+std::mutex httpMutex;
 
 void startHttpServer(std::string tIp, int tPort) {
 
@@ -24,6 +24,8 @@ void startHttpServer(std::string tIp, int tPort) {
     }
 
     transcodeServer.Post("/StreamUrl", [](const httplib::Request &req, httplib::Response &res) {
+        std::lock_guard<std::mutex> guard(httpMutex);
+
         auto url = req.get_param_value("url");
         auto responseIp = req.get_param_value("responseIp");
         auto responsePort = req.get_param_value("responsePort");
@@ -33,11 +35,16 @@ void startHttpServer(std::string tIp, int tPort) {
         } else {
             INFO("StreamUrl {}, stream will be sent to {}:{}", url, responseIp, responsePort);
 
-            auto ffmpeg = new FFmpegHandler(responseIp, std::stoi(responsePort));
-            {
-                std::lock_guard<std::mutex> guard(handlerMutex);
-                handler[responseIp + ":" + responsePort] = ffmpeg;
+            std::string streamId = responseIp + "_" + responsePort;
+
+            if (handler[streamId] != nullptr) {
+                handler[streamId]->stopVideo();
             }
+
+            auto ffmpeg = new FFmpegHandler(responseIp, std::stoi(responsePort));
+            delete handler[streamId];
+            handler.erase(streamId);
+            handler[streamId] = ffmpeg;
 
             DEBUG("Start video streaming...");
             ffmpeg->streamVideo(url);
@@ -48,6 +55,8 @@ void startHttpServer(std::string tIp, int tPort) {
     });
 
     transcodeServer.Post("/Pause", [](const httplib::Request &req, httplib::Response &res) {
+        std::lock_guard<std::mutex> guard(httpMutex);
+
         auto streamId = req.get_param_value("streamId");
 
         if (streamId.empty()) {
@@ -63,6 +72,8 @@ void startHttpServer(std::string tIp, int tPort) {
     });
 
     transcodeServer.Post("/SeekTo", [](const httplib::Request &req, httplib::Response &res) {
+        std::lock_guard<std::mutex> guard(httpMutex);
+
         auto streamId = req.get_param_value("streamId");
         auto seekTo = req.get_param_value("seekTo");
 
@@ -79,6 +90,8 @@ void startHttpServer(std::string tIp, int tPort) {
     });
 
     transcodeServer.Post("/Resume", [](const httplib::Request &req, httplib::Response &res) {
+        std::lock_guard<std::mutex> guard(httpMutex);
+
         auto streamId = req.get_param_value("streamId");
 
         if (streamId.empty()) {
@@ -94,6 +107,8 @@ void startHttpServer(std::string tIp, int tPort) {
     });
 
     transcodeServer.Post("/Stop", [](const httplib::Request &req, httplib::Response &res) {
+        std::lock_guard<std::mutex> guard(httpMutex);
+
         auto streamId = req.get_param_value("streamId");
 
         if (streamId.empty()) {
@@ -105,11 +120,8 @@ void startHttpServer(std::string tIp, int tPort) {
                 handler[streamId]->stopVideo();
             }
 
-            {
-                std::lock_guard<std::mutex> guard(handlerMutex);
-                delete handler[streamId];
-                handler.erase(streamId);
-            }
+            delete handler[streamId];
+            handler.erase(streamId);
 
             res.status = 200;
             res.set_content("ok", "text/plain");
