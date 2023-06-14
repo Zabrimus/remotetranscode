@@ -3,8 +3,6 @@
 
 BrowserClient::BrowserClient(std::string browserIp, int browserPort) {
     client = new httplib::Client(browserIp, browserPort);
-
-    DEBUG("==> 2: BrowserPort = {}", browserPort);
 }
 
 BrowserClient::~BrowserClient() {

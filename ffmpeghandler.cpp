@@ -91,8 +91,11 @@ bool FFmpegHandler::streamVideo(std::string url) {
 
     // TODO: Evt. Transcoding durchführen. Die Commandline muss generischer werden.
     DEBUG("Start transcoder");
-    std::string cmdLine = "ffmpeg -re -y -i " + url +  " -c copy -f mpegts " + fifoFilename;
-    streamHandler = new TinyProcessLib::Process(cmdLine, "",
+    std::vector<std::string> callStr {
+        "ffmpeg", "-re", "-y", "-i", url, "-c", "copy", "-f",  "mpegts", fifoFilename
+    };
+
+    streamHandler = new TinyProcessLib::Process(callStr, "",
         [](const char *bytes, size_t n) {
             DEBUG("{}", std::string(bytes, n));
         },
@@ -157,7 +160,15 @@ bool FFmpegHandler::probe(const std::string& url) {
 
     // get stream infos
     DEBUG("Starte ffprobe");
-    TinyProcessLib::Process process("ffprobe -y -i " + url + R"( -loglevel quiet -print_format csv -show_entries "format=duration" -show_entries "stream=codec_type,codec_name,bit_rate")", "", [output](const char *bytes, size_t n) {
+    std::vector<std::string> callStr {
+        "ffprobe", "-y", "-i", url,
+        "-loglevel", "quiet",
+        "-print_format", "csv",
+        "-show_entries", "format=duration",
+        "-show_entries", "stream=codec_type,codec_name,bit_rate"
+    };
+
+    TinyProcessLib::Process process(callStr, "", [output](const char *bytes, size_t n) {
         DEBUG("STR: {}", std::string(bytes, n));
 
         *output += std::string(bytes, n);
@@ -201,7 +212,15 @@ bool FFmpegHandler::probe(const std::string& url) {
 bool FFmpegHandler::createVideoWithLength(std::string seconds, const std::string& name) {
     auto output = std::make_shared<std::string>();
 
-    TinyProcessLib::Process process("ffmpeg -y -i movie/transparent-full.webm -t " + seconds  + " -codec copy movie/" +  name , "",
+    if (seconds == "N/A") {
+        seconds = "08:00:00.000000000";
+    }
+
+    std::vector<std::string> callStr {
+        "ffmpeg", "-y", "-i", "movie/transparent-full.webm", "-t", seconds, "-codec", "copy", "movie/" + name
+    };
+
+    TinyProcessLib::Process process(callStr, "",
                                     [output](const char *bytes, size_t n) {
                                         *output += std::string(bytes, n);
                                     },
