@@ -47,7 +47,7 @@ void startHttpServer(std::string tIp, int tPort) {
             handler[streamId] = ffmpeg;
 
             DEBUG("Start video streaming...");
-            ffmpeg->streamVideo(url);
+            ffmpeg->streamVideo(url, "0");
 
             res.status = 200;
             res.set_content("ok", "text/plain");
@@ -93,13 +93,14 @@ void startHttpServer(std::string tIp, int tPort) {
         std::lock_guard<std::mutex> guard(httpMutex);
 
         auto streamId = req.get_param_value("streamId");
+        auto position = req.get_param_value("position");
+
+        DEBUG("Resume: StreamId: {}, Position: {}", streamId, position);
 
         if (streamId.empty()) {
             res.status = 404;
         } else {
-            INFO("Resume streamId {}", streamId);
-
-            handler[streamId]->resumeVideo();
+            handler[streamId]->resumeVideo(position);
 
             res.status = 200;
             res.set_content("ok", "text/plain");

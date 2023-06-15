@@ -53,8 +53,11 @@ FFmpegHandler::~FFmpegHandler() {
     stopVideo();
 }
 
-bool FFmpegHandler::streamVideo(std::string url) {
+bool FFmpegHandler::streamVideo(std::string url, std::string position) {
     bool createPipe = false;
+    currentUrl = url;
+
+    DEBUG("StreamVideo: {} -> {}", position, url);
 
     // stop existing video streaming, paranoia
     stopVideo();
@@ -92,7 +95,7 @@ bool FFmpegHandler::streamVideo(std::string url) {
     // TODO: Evt. Transcoding durchführen. Die Commandline muss generischer werden.
     DEBUG("Start transcoder");
     std::vector<std::string> callStr {
-        "ffmpeg", "-re", "-y", "-i", url, "-c", "copy", "-f",  "mpegts", fifoFilename
+        "ffmpeg", "-re", "-y", "-ss", position, "-i", url, "-c", "copy", "-f",  "mpegts", fifoFilename
     };
 
     streamHandler = new TinyProcessLib::Process(callStr, "",
@@ -121,11 +124,17 @@ bool FFmpegHandler::streamVideo(std::string url) {
 }
 
 bool FFmpegHandler::pauseVideo() {
-    return false;
+    if (streamHandler != nullptr) {
+        stopVideo();
+    }
+
+    return true;
 }
 
-bool FFmpegHandler::resumeVideo() {
-    return false;
+bool FFmpegHandler::resumeVideo(std::string position) {
+    streamVideo(currentUrl, position);
+
+    return true;
 }
 
 void FFmpegHandler::stopVideo() {

@@ -21,9 +21,9 @@ public:
     FFmpegHandler(std::string browserIp, int browserPort);
     ~FFmpegHandler();
 
-    bool streamVideo(std::string url);
+    bool streamVideo(std::string url, std::string position);
     bool pauseVideo();
-    bool resumeVideo();
+    bool resumeVideo(std::string position);
     void stopVideo();
     bool seekTo(std::string pos);
 
@@ -38,6 +38,7 @@ private:
 
     std::vector<stream_info> streams;
     std::string duration;
+    std::string currentUrl;
 
     BrowserClient* browserClient;
 
