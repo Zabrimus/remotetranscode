@@ -161,7 +161,10 @@ void FFmpegHandler::stopVideo() {
 }
 
 bool FFmpegHandler::seekTo(std::string pos) {
-    return false;
+    pauseVideo();
+    resumeVideo(pos);
+
+    return true;
 }
 
 bool FFmpegHandler::probe(const std::string& url) {
