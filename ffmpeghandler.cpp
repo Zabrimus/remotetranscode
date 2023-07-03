@@ -3,6 +3,10 @@
 #include "ffmpeghandler.h"
 #include "logger.h"
 
+bool endsWith(const std::string& str, const std::string& suffix) {
+    return str.size() >= suffix.size() && 0 == str.compare(str.size()-suffix.size(), suffix.size(), suffix);
+}
+
 std::vector<std::string> split(std::string s, std::string delimiter) {
     size_t pos_start = 0, pos_end, delim_len = delimiter.length();
     std::string token;
@@ -94,9 +98,24 @@ bool FFmpegHandler::streamVideo(std::string url, std::string position) {
 
     // TODO: Evt. Transcoding durchführen. Die Commandline muss generischer werden.
     DEBUG("Start transcoder");
+    // create parameter list
     std::vector<std::string> callStr {
-        "ffmpeg", "-re", "-y", "-ss", position, "-i", url, "-c", "copy", "-f",  "mpegts", fifoFilename
+        "ffmpeg", "-re", "-y"
     };
+
+    // in case of mpeg-dash ignore the seek command
+    if (!endsWith(url, ".mpd")) {
+        callStr.push_back("-ss");
+        callStr.push_back(position);
+    }
+
+    callStr.push_back("-i");
+    callStr.push_back(url);
+    callStr.push_back("-c");
+    callStr.push_back("copy");
+    callStr.push_back("-f");
+    callStr.push_back("mpegts");
+    callStr.push_back(fifoFilename);
 
     streamHandler = new TinyProcessLib::Process(callStr, "",
         [](const char *bytes, size_t n) {
@@ -181,8 +200,6 @@ bool FFmpegHandler::probe(const std::string& url) {
     };
 
     TinyProcessLib::Process process(callStr, "", [output](const char *bytes, size_t n) {
-        DEBUG("STR: {}", std::string(bytes, n));
-
         *output += std::string(bytes, n);
     });
 
