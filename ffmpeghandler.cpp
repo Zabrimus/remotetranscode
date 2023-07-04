@@ -63,9 +63,6 @@ bool FFmpegHandler::streamVideo(std::string url, std::string position) {
 
     DEBUG("StreamVideo: {} -> {}", position, url);
 
-    // stop existing video streaming, paranoia
-    stopVideo();
-
     // create transparent video
     DEBUG("Create empty video");
     if (!createVideo(url, "transparent-video-" + browserIp + "_" + std::to_string(browserPort) + ".webm")) {
@@ -116,6 +113,14 @@ bool FFmpegHandler::streamVideo(std::string url, std::string position) {
     callStr.push_back("-f");
     callStr.push_back("mpegts");
     callStr.push_back(fifoFilename);
+
+    std::ostringstream paramOut;
+    if (!callStr.empty()) {
+        std::copy(callStr.begin(), callStr.end() - 1, std::ostream_iterator<std::string>(paramOut, " "));
+        paramOut << callStr.back();
+    }
+
+    DEBUG("Call ffmpeg: {}", paramOut.str());
 
     streamHandler = new TinyProcessLib::Process(callStr, "",
         [](const char *bytes, size_t n) {
