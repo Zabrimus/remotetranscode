@@ -4,7 +4,7 @@ project(
   version: '4bf0e59e64f18d3080a1ce4e853775de2181e993',
   license: 'MIT',
   default_options: ['cpp_std=c++17'],
-  meson_version: '>=0.63.0',
+  meson_version: '>=0.56.2',
 )
 
 src = files(

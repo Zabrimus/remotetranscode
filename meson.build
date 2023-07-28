@@ -1,7 +1,7 @@
 project('remotetranscode', 'cpp', 'c',
   version : '0.1',
   default_options : ['warning_level=1', 'c_std=c17', 'cpp_std=c++17'],
-  meson_version: '>=0.63.0')
+  meson_version: '>=0.56.2')
 
 add_global_arguments(language : 'cpp')
 
