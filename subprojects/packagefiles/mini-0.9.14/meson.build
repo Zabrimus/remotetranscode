@@ -4,7 +4,7 @@ project(
   version: '0.8.5',
   license: 'Apache-2.0 license',
   default_options: ['cpp_std=c++17'],
-  meson_version: '>=0.63.0',
+  meson_version: '>=0.56.2',
 )
 
 inc = include_directories('src')
