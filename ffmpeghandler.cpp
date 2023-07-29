@@ -97,7 +97,7 @@ bool FFmpegHandler::streamVideo(std::string url, std::string position) {
     DEBUG("Start transcoder");
     // create parameter list
     std::vector<std::string> callStr {
-        "ffmpeg", "-re", "-y"
+        "ffmpeg", "-hide_banner", "-re", "-y"
     };
 
     // in case of mpeg-dash ignore the seek command
@@ -197,7 +197,7 @@ bool FFmpegHandler::probe(const std::string& url) {
     // get stream infos
     DEBUG("Starte ffprobe");
     std::vector<std::string> callStr {
-        "ffprobe", "-y", "-i", url,
+        "ffprobe", "-hide_banner", "-i", url,
         "-loglevel", "quiet",
         "-print_format", "csv",
         "-show_entries", "format=duration",
@@ -251,7 +251,7 @@ bool FFmpegHandler::createVideoWithLength(std::string seconds, const std::string
     }
 
     std::vector<std::string> callStr {
-        "ffmpeg", "-y", "-i", "movie/transparent-full.webm", "-t", seconds, "-codec", "copy", "movie/" + name
+        "ffmpeg", "-hide_banner" , "-y", "-i", "movie/transparent-full.webm", "-t", seconds, "-codec", "copy", "movie/" + name
     };
 
     TinyProcessLib::Process process(callStr, "",
