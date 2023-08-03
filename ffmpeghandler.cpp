@@ -112,6 +112,7 @@ bool FFmpegHandler::streamVideo(std::string url, std::string position) {
     // iterate overall streams
     int audioStreamId = 0;
     int videoStreamId = 0;
+
     for (const auto& s : streams) {
         if (s.type == "audio") {
             callStr.emplace_back("-map");
@@ -225,6 +226,8 @@ bool FFmpegHandler::seekTo(std::string pos) {
 
 bool FFmpegHandler::probe(const std::string& url) {
     auto output = std::make_shared<std::string>();
+
+    streams.clear();
 
     // get stream infos
     DEBUG("Starte ffprobe");
