@@ -43,7 +43,7 @@ void startReaderThread(int fifo, FFmpegHandler *handler, BrowserClient* client) 
     }
 }
 
-FFmpegHandler::FFmpegHandler(std::string browserIp, int browserPort) : browserIp(browserIp), browserPort(browserPort) {
+FFmpegHandler::FFmpegHandler(std::string browserIp, int browserPort, TranscodeConfig& tc) : browserIp(browserIp), browserPort(browserPort), transcodeConfig(tc) {
     streamHandler = nullptr;
     readerThread = nullptr;
     readerRunning = false;
@@ -102,17 +102,49 @@ bool FFmpegHandler::streamVideo(std::string url, std::string position) {
 
     // in case of mpeg-dash ignore the seek command
     if (!endsWith(url, ".mpd")) {
-        callStr.push_back("-ss");
-        callStr.push_back(position);
+        callStr.emplace_back("-ss");
+        callStr.emplace_back(position);
     }
 
-    callStr.push_back("-i");
-    callStr.push_back(url);
-    callStr.push_back("-c");
-    callStr.push_back("copy");
-    callStr.push_back("-f");
-    callStr.push_back("mpegts");
-    callStr.push_back(fifoFilename);
+    callStr.emplace_back("-i");
+    callStr.emplace_back(url);
+
+    // iterate overall streams
+    int audioStreamId = 0;
+    int videoStreamId = 0;
+    for (const auto& s : streams) {
+        if (s.type == "audio") {
+            callStr.emplace_back("-map");
+            callStr.emplace_back("0:a:" + std::to_string(audioStreamId));
+            callStr.emplace_back("-c:a:" + std::to_string(audioStreamId));
+
+            if (transcodeConfig.isCopyAudio(s.codec, s.sample_rate)) {
+                callStr.emplace_back("copy");
+            } else {
+                auto audioParameter = transcodeConfig.getAudioTranscodeParameter();
+                callStr.insert(callStr.end(), audioParameter.begin(), audioParameter.end());
+            }
+
+            audioStreamId++;
+        } else if (s.type == "video") {
+            callStr.emplace_back("-map");
+            callStr.emplace_back("0:v:" + std::to_string(videoStreamId));
+            callStr.emplace_back("-c:v:" + std::to_string(videoStreamId));
+
+            if (transcodeConfig.isCopyVideo(s.codec)) {
+                callStr.emplace_back("copy");
+            } else {
+                auto videoParameter = transcodeConfig.getVideoTranscodeParameter();
+                callStr.insert(callStr.end(), videoParameter.begin(), videoParameter.end());
+            }
+
+            videoStreamId++;
+        }
+    }
+
+    callStr.emplace_back("-f");
+    callStr.emplace_back("mpegts");
+    callStr.emplace_back(fifoFilename);
 
     std::ostringstream paramOut;
     if (!callStr.empty()) {
@@ -201,7 +233,7 @@ bool FFmpegHandler::probe(const std::string& url) {
         "-loglevel", "quiet",
         "-print_format", "csv",
         "-show_entries", "format=duration",
-        "-show_entries", "stream=codec_type,codec_name,bit_rate"
+        "-show_entries", "stream=codec_type,codec_name,bit_rate,sample_rate"
     };
 
     TinyProcessLib::Process process(callStr, "", [output](const char *bytes, size_t n) {
@@ -219,8 +251,6 @@ bool FFmpegHandler::probe(const std::string& url) {
     std::istringstream input;
     input.str(*output);
     for (std::string line; std::getline(input, line);) {
-        DEBUG("LINE: {}", line);
-
         auto parts = split(line, ",");
 
         if (!parts.empty()) {
@@ -229,7 +259,13 @@ bool FFmpegHandler::probe(const std::string& url) {
                 info.codec = parts[1];
                 info.type = parts[2];
 
-                DEBUG("Found stream: {}, {}", info.type, info.codec);
+                if (info.type == "audio") {
+                    info.sample_rate = parts[3];
+                } else {
+                    info.sample_rate = "0";
+                }
+
+                DEBUG("Found stream: {}, {}, {}", info.type, info.codec, info.sample_rate);
 
                 streams.push_back(info);
             } else if (parts[0] == "format") {

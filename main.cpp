@@ -3,8 +3,8 @@
 #include "mini/ini.h"
 #include "httplib.h"
 #include "logger.h"
-#include "browserclient.h"
 #include "ffmpeghandler.h"
+#include "transcodeconfig.h"
 
 std::string transcoderIp;
 int transcoderPort;
@@ -13,6 +13,8 @@ httplib::Server transcodeServer;
 
 std::map<std::string, FFmpegHandler*> handler;
 std::mutex httpMutex;
+
+TranscodeConfig transcodeConfig;
 
 void startHttpServer(std::string tIp, int tPort) {
 
@@ -41,7 +43,7 @@ void startHttpServer(std::string tIp, int tPort) {
                 handler[streamId]->stopVideo();
             }
 
-            auto ffmpeg = new FFmpegHandler(responseIp, std::stoi(responsePort));
+            auto ffmpeg = new FFmpegHandler(responseIp, std::stoi(responsePort), transcodeConfig);
             delete handler[streamId];
             handler.erase(streamId);
             handler[streamId] = ffmpeg;
@@ -164,22 +166,44 @@ bool readConfiguration(const char* configFile) {
     return true;
 }
 
+bool readCodecFile(const char* codecFile) {
+    mINI::INIFile file(codecFile);
+    mINI::INIStructure ini;
+    auto result = file.read(ini);
+
+    if (!result) {
+        ERROR("Unable to read codec file: %s", codecFile);
+        return false;
+    }
+
+    transcodeConfig.createConfiguration(ini);
+
+    return true;
+}
+
 int main(int argc, char* argv[]) {
     if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " -c <config_file>" << std::endl;
+        std::cerr << "Usage: " << argv[0] << " -c <config_file> -t <transcode_file>" << std::endl;
         return -1;
     }
 
     static struct option long_options[] = {
             { "config",      required_argument, nullptr, 'c' },
+            { "transcode",   optional_argument, nullptr, 't' },
             {nullptr }
     };
 
     int c, option_index = 0;
-    while ((c = getopt_long(argc, argv, "c:", long_options, &option_index)) != -1) {
+    while ((c = getopt_long(argc, argv, "c:t:", long_options, &option_index)) != -1) {
         switch (c) {
             case 'c':
                 if (!readConfiguration(optarg)) {
+                    exit(-1);
+                }
+                break;
+
+            case 't':
+                if (!readCodecFile(optarg)) {
                     exit(-1);
                 }
                 break;

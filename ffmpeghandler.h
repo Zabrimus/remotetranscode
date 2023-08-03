@@ -4,10 +4,12 @@
 #include <thread>
 #include "process.hpp"
 #include "browserclient.h"
+#include "transcodeconfig.h"
 
 typedef struct stream_info {
     std::string type;
     std::string codec;
+    std::string sample_rate;
 } stream_info;
 
 class FFmpegHandler {
@@ -18,7 +20,7 @@ private:
     std::thread *readerThread;
 
 public:
-    FFmpegHandler(std::string browserIp, int browserPort);
+    FFmpegHandler(std::string browserIp, int browserPort, TranscodeConfig& tc);
     ~FFmpegHandler();
 
     bool streamVideo(std::string url, std::string position);
@@ -41,6 +43,8 @@ private:
     std::string currentUrl;
 
     BrowserClient* browserClient;
+
+    TranscodeConfig transcodeConfig;
 
 private:
     bool probe(const std::string& url);
