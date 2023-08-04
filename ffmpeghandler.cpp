@@ -134,6 +134,11 @@ bool FFmpegHandler::streamVideo(std::string url, std::string position) {
 
             if (transcodeConfig.isCopyVideo(s.codec)) {
                 callStr.emplace_back("copy");
+
+                if (s.codec == "h264" && s.codec_tag == "avc1") {
+                    callStr.emplace_back("-bsf:v");
+                    callStr.emplace_back("h264_mp4toannexb");
+                }
             } else {
                 auto videoParameter = transcodeConfig.getVideoTranscodeParameter();
                 callStr.insert(callStr.end(), videoParameter.begin(), videoParameter.end());
@@ -236,7 +241,7 @@ bool FFmpegHandler::probe(const std::string& url) {
         "-loglevel", "quiet",
         "-print_format", "csv",
         "-show_entries", "format=duration",
-        "-show_entries", "stream=codec_type,codec_name,bit_rate,sample_rate"
+        "-show_entries", "stream=codec_type,codec_name,bit_rate,sample_rate,codec_tag_string"
     };
 
     TinyProcessLib::Process process(callStr, "", [output](const char *bytes, size_t n) {
@@ -261,14 +266,15 @@ bool FFmpegHandler::probe(const std::string& url) {
                 stream_info info;
                 info.codec = parts[1];
                 info.type = parts[2];
+                info.codec_tag = parts[3];
 
                 if (info.type == "audio") {
-                    info.sample_rate = parts[3];
+                    info.sample_rate = parts[4];
                 } else {
                     info.sample_rate = "0";
                 }
 
-                DEBUG("Found stream: {}, {}, {}", info.type, info.codec, info.sample_rate);
+                DEBUG("Found stream: {}, {}, {}", info.type, info.codec, info.codec_tag, info.sample_rate);
 
                 streams.push_back(info);
             } else if (parts[0] == "format") {

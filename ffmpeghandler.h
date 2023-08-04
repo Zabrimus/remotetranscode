@@ -9,6 +9,7 @@
 typedef struct stream_info {
     std::string type;
     std::string codec;
+    std::string codec_tag;
     std::string sample_rate;
 } stream_info;
 
