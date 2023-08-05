@@ -249,12 +249,8 @@ bool FFmpegHandler::probe(const std::string& url) {
     });
 
     int exit = process.get_exit_status();
-    if (exit != 0) {
-        ERROR("Call of ffprobe failed.");
-        return false;
-    }
 
-    DEBUG("OUTPUT: {}", *output);
+    DEBUG("OUTPUT( {} ) {}", exit, *output);
 
     std::istringstream input;
     input.str(*output);
