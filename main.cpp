@@ -131,7 +131,10 @@ void startHttpServer(std::string tIp, int tPort) {
         }
     });
 
-    transcodeServer.listen(tIp, tPort);
+    if (!transcodeServer.listen(tIp, tPort)) {
+        CRITICAL("Call of listen failed: ip {}, port {}, Reason: {}", tIp, tPort, strerror(errno));
+        exit(1);
+    }
 }
 
 bool readConfiguration(const char* configFile) {

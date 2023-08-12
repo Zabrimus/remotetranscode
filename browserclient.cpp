@@ -12,12 +12,12 @@ BrowserClient::~BrowserClient() {
 bool BrowserClient::ProcessTSPacket(std::string packet) {
     if (auto res = client->Post("/ProcessTSPacket", packet, "text/plain")) {
         if (res->status != 200) {
-            std::cout << "Http result: " << res->status << std::endl;
+            INFO("[remotetranscoder] Http result(ProcessTSPacket): {}", res->status);
             return false;
         }
     } else {
         auto err = res.error();
-        std::cout << "HTTP error: " << httplib::to_string(err) << std::endl;
+        ERROR("[remotetranscoder] Http error(ProcessTSPacket): {}", httplib::to_string(err));
         return false;
     }
 
