@@ -162,11 +162,11 @@ bool FFmpegHandler::streamVideo(std::string url, std::string position) {
 
     streamHandler = new TinyProcessLib::Process(callStr, "",
         [](const char *bytes, size_t n) {
-            DEBUG("{}", std::string(bytes, n));
+            // DEBUG("{}", std::string(bytes, n));
         },
 
         [](const char *bytes, size_t n) {
-            DEBUG("{}", std::string(bytes, n));
+            // DEBUG("{}", std::string(bytes, n));
         },
         true
     );
@@ -297,7 +297,7 @@ bool FFmpegHandler::createVideoWithLength(std::string seconds, const std::string
 
     TinyProcessLib::Process process(callStr, "",
                                     [output](const char *bytes, size_t n) {
-                                        *output += std::string(bytes, n);
+                                        // *output += std::string(bytes, n);
                                     },
                                     [output](const char *bytes, size_t n) {
                                         *output += std::string(bytes, n);

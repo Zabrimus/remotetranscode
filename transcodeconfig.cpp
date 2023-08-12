@@ -58,8 +58,6 @@ bool TranscodeConfig::createConfiguration(mINI::INIStructure ini) {
         allowedAudioCodecs.clear();
     }
 
-    printf("SIZE: %lu, %lu -> %lu, %lu\n", allowedVideoCodecs.size(), allowedAudioCodecs.size(), videoTranscodeParameter.size(), audioTranscodeParameter.size());
-
     return true;
 }
 
