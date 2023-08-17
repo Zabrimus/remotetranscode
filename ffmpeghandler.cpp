@@ -57,9 +57,10 @@ FFmpegHandler::~FFmpegHandler() {
     stopVideo();
 }
 
-bool FFmpegHandler::streamVideo(std::string url, std::string position) {
+bool FFmpegHandler::streamVideo(std::string url, std::string position, std::string cookies) {
     bool createPipe = false;
     currentUrl = url;
+    this->cookies = cookies;
 
     DEBUG("StreamVideo: {} -> {}", position, url);
 
@@ -194,7 +195,7 @@ bool FFmpegHandler::pauseVideo() {
 }
 
 bool FFmpegHandler::resumeVideo(std::string position) {
-    streamVideo(currentUrl, position);
+    streamVideo(currentUrl, position, cookies);
 
     return true;
 }

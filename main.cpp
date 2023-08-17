@@ -29,6 +29,7 @@ void startHttpServer(std::string tIp, int tPort) {
         std::lock_guard<std::mutex> guard(httpMutex);
 
         auto url = req.get_param_value("url");
+        auto cookies = req.get_param_value("cookies");
         auto responseIp = req.get_param_value("responseIp");
         auto responsePort = req.get_param_value("responsePort");
 
@@ -49,7 +50,7 @@ void startHttpServer(std::string tIp, int tPort) {
             handler[streamId] = ffmpeg;
 
             DEBUG("Start video streaming...");
-            ffmpeg->streamVideo(url, "0");
+            ffmpeg->streamVideo(url, "0", cookies);
 
             res.status = 200;
             res.set_content("ok", "text/plain");

@@ -24,7 +24,7 @@ public:
     FFmpegHandler(std::string browserIp, int browserPort, TranscodeConfig& tc);
     ~FFmpegHandler();
 
-    bool streamVideo(std::string url, std::string position);
+    bool streamVideo(std::string url, std::string position, std::string cookies);
     bool pauseVideo();
     bool resumeVideo(std::string position);
     void stopVideo();
@@ -38,6 +38,8 @@ private:
 
     int fifo;
     bool readerRunning;
+
+    std::string cookies;
 
     std::vector<stream_info> streams;
     std::string duration;
