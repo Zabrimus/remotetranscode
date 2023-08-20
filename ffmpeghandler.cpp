@@ -57,10 +57,12 @@ FFmpegHandler::~FFmpegHandler() {
     stopVideo();
 }
 
-bool FFmpegHandler::streamVideo(std::string url, std::string position, std::string cookies) {
+bool FFmpegHandler::streamVideo(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent) {
     bool createPipe = false;
     currentUrl = url;
     this->cookies = cookies;
+    this->referer = referer;
+    this->userAgent = userAgent;
 
     DEBUG("StreamVideo: {} -> {}", position, url);
 
@@ -94,11 +96,10 @@ bool FFmpegHandler::streamVideo(std::string url, std::string position, std::stri
         }
     }
 
-    // TODO: Evt. Transcoding durchführen. Die Commandline muss generischer werden.
     DEBUG("Start transcoder");
     // create parameter list
     std::vector<std::string> callStr {
-        "ffmpeg", "-hide_banner", "-re", "-y"
+        "ffmpeg", "-hide_banner", "-re", "-y", "-referer", referer, "-user_agent", userAgent, "-headers", "Cookie: " + cookies
     };
 
     // in case of mpeg-dash ignore the seek command
@@ -163,11 +164,11 @@ bool FFmpegHandler::streamVideo(std::string url, std::string position, std::stri
 
     streamHandler = new TinyProcessLib::Process(callStr, "",
         [](const char *bytes, size_t n) {
-            // DEBUG("{}", std::string(bytes, n));
+            DEBUG("{}", std::string(bytes, n));
         },
 
         [](const char *bytes, size_t n) {
-            // DEBUG("{}", std::string(bytes, n));
+            DEBUG("{}", std::string(bytes, n));
         },
         true
     );
@@ -195,7 +196,7 @@ bool FFmpegHandler::pauseVideo() {
 }
 
 bool FFmpegHandler::resumeVideo(std::string position) {
-    streamVideo(currentUrl, position, cookies);
+    streamVideo(currentUrl, position, cookies, referer, userAgent);
 
     return true;
 }
@@ -234,12 +235,15 @@ bool FFmpegHandler::probe(const std::string& url) {
     auto output = std::make_shared<std::string>();
 
     streams.clear();
-
+// -referer "mytest.de" -user_agent "my_user_agent"
     // get stream infos
     DEBUG("Starte ffprobe");
     std::vector<std::string> callStr {
         "ffprobe", "-hide_banner", "-i", url,
         "-loglevel", "quiet",
+        "-referer", referer,
+        "-user_agent", userAgent,
+        "-headers", "Cookie: " + cookies,
         "-print_format", "csv",
         "-show_entries", "format=duration",
         "-show_entries", "stream=codec_type,codec_name,bit_rate,sample_rate,codec_tag_string"

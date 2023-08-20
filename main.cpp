@@ -30,6 +30,8 @@ void startHttpServer(std::string tIp, int tPort) {
 
         auto url = req.get_param_value("url");
         auto cookies = req.get_param_value("cookies");
+        auto referer = req.get_param_value("referer");
+        auto userAgent = req.get_param_value("userAgent");
         auto responseIp = req.get_param_value("responseIp");
         auto responsePort = req.get_param_value("responsePort");
 
@@ -50,7 +52,7 @@ void startHttpServer(std::string tIp, int tPort) {
             handler[streamId] = ffmpeg;
 
             DEBUG("Start video streaming...");
-            ffmpeg->streamVideo(url, "0", cookies);
+            ffmpeg->streamVideo(url, "0", cookies, referer, userAgent);
 
             res.status = 200;
             res.set_content("ok", "text/plain");
@@ -131,6 +133,13 @@ void startHttpServer(std::string tIp, int tPort) {
             res.set_content("ok", "text/plain");
         }
     });
+
+    /*
+    transcodeServer.set_file_request_handler([](const httplib::Request &req, httplib::Response &res) {
+        DEBUG("Request File: {}", req.target);
+        res.set_header("Cache-Control", "no-cache");
+    });
+    */
 
     if (!transcodeServer.listen(tIp, tPort)) {
         CRITICAL("Call of listen failed: ip {}, port {}, Reason: {}", tIp, tPort, strerror(errno));
