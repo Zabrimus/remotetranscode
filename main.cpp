@@ -18,12 +18,50 @@ TranscodeConfig transcodeConfig;
 
 void startHttpServer(std::string tIp, int tPort) {
 
-    auto ret = transcodeServer.set_mount_point("/movie", "./movie");
+    httplib::Headers headers;
+    headers.emplace("Cache-Control", "no-cache");
+
+    auto ret = transcodeServer.set_mount_point("/movie", "./movie", headers);
     if (!ret) {
         // must not happen
         ERROR("http mount point ./movie does not exists. Application will not work as desired.");
         return;
     }
+
+    transcodeServer.Post("/Probe", [](const httplib::Request &req, httplib::Response &res) {
+        std::lock_guard<std::mutex> guard(httpMutex);
+
+        auto url = req.get_param_value("url");
+        auto cookies = req.get_param_value("cookies");
+        auto referer = req.get_param_value("referer");
+        auto userAgent = req.get_param_value("userAgent");
+        auto responseIp = req.get_param_value("responseIp");
+        auto responsePort = req.get_param_value("responsePort");
+
+        if (url.empty() || responseIp.empty() || responsePort.empty()) {
+            res.status = 404;
+        } else {
+            INFO("Probe {}", url);
+
+            std::string streamId = responseIp + "_" + responsePort;
+
+            if (handler[streamId] != nullptr) {
+                handler[streamId]->stopVideo();
+            }
+
+            delete handler[streamId];
+            handler.erase(streamId);
+
+            auto ffmpeg = new FFmpegHandler(responseIp, std::stoi(responsePort), transcodeConfig);
+            handler[streamId] = ffmpeg;
+
+            DEBUG("Probe video...");
+            ffmpeg->probeVideo(url, "0", cookies, referer, userAgent);
+
+            res.status = 200;
+            res.set_content("ok", "text/plain");
+        }
+    });
 
     transcodeServer.Post("/StreamUrl", [](const httplib::Request &req, httplib::Response &res) {
         std::lock_guard<std::mutex> guard(httpMutex);
@@ -42,14 +80,14 @@ void startHttpServer(std::string tIp, int tPort) {
 
             std::string streamId = responseIp + "_" + responsePort;
 
-            if (handler[streamId] != nullptr) {
-                handler[streamId]->stopVideo();
-            }
+            // call of probe before StreamUrl is a must
+            auto ffmpeg = handler[streamId];
 
-            auto ffmpeg = new FFmpegHandler(responseIp, std::stoi(responsePort), transcodeConfig);
-            delete handler[streamId];
-            handler.erase(streamId);
-            handler[streamId] = ffmpeg;
+            if (ffmpeg == nullptr) {
+                ERROR("Probe has not been called before StreamUrl. Aborting...");
+                res.status = 500;
+                res.set_content("Probe has not been called before StreamUrl. Aborting...", "text/plain");
+            }
 
             DEBUG("Start video streaming...");
             ffmpeg->streamVideo(url, "0", cookies, referer, userAgent);
@@ -133,13 +171,6 @@ void startHttpServer(std::string tIp, int tPort) {
             res.set_content("ok", "text/plain");
         }
     });
-
-    /*
-    transcodeServer.set_file_request_handler([](const httplib::Request &req, httplib::Response &res) {
-        DEBUG("Request File: {}", req.target);
-        res.set_header("Cache-Control", "no-cache");
-    });
-    */
 
     if (!transcodeServer.listen(tIp, tPort)) {
         CRITICAL("Call of listen failed: ip {}, port {}, Reason: {}", tIp, tPort, strerror(errno));

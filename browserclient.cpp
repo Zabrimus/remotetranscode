@@ -6,6 +6,7 @@ BrowserClient::BrowserClient(std::string browserIp, int browserPort) {
 }
 
 BrowserClient::~BrowserClient() {
+    client->stop();
     delete client;
 }
 

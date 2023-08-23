@@ -24,6 +24,7 @@ public:
     FFmpegHandler(std::string browserIp, int browserPort, TranscodeConfig& tc);
     ~FFmpegHandler();
 
+    bool probeVideo(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent);
     bool streamVideo(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent);
     bool pauseVideo();
     bool resumeVideo(std::string position);

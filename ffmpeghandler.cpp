@@ -55,6 +55,23 @@ FFmpegHandler::FFmpegHandler(std::string browserIp, int browserPort, TranscodeCo
 FFmpegHandler::~FFmpegHandler() {
     readerRunning = false;
     stopVideo();
+    delete browserClient;
+}
+
+bool FFmpegHandler::probeVideo(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent) {
+    bool createPipe = false;
+    currentUrl = url;
+    this->cookies = cookies;
+    this->referer = referer;
+    this->userAgent = userAgent;
+
+    // create transparent video
+    DEBUG("Create empty video");
+    if (!createVideo(url, "transparent-video-" + browserIp + "_" + std::to_string(browserPort) + ".webm")) {
+        return false;
+    }
+
+    return true;
 }
 
 bool FFmpegHandler::streamVideo(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent) {
@@ -65,12 +82,6 @@ bool FFmpegHandler::streamVideo(std::string url, std::string position, std::stri
     this->userAgent = userAgent;
 
     DEBUG("StreamVideo: {} -> {}", position, url);
-
-    // create transparent video
-    DEBUG("Create empty video");
-    if (!createVideo(url, "transparent-video-" + browserIp + "_" + std::to_string(browserPort) + ".webm")) {
-        return false;
-    }
 
     DEBUG("Create FIFO");
     std::string fifoFilename = "/tmp/ffmpegts_" + browserIp + "_" + std::to_string(browserPort);
@@ -182,7 +193,7 @@ bool FFmpegHandler::streamVideo(std::string url, std::string position, std::stri
     DEBUG("Start reader thread");
     readerRunning = true;
     readerThread = new std::thread(startReaderThread, fifo, this, browserClient);
-    readerThread->detach();
+    // readerThread->detach();
 
     return true;
 }
@@ -220,6 +231,7 @@ void FFmpegHandler::stopVideo() {
     if (streamHandler != nullptr) {
         streamHandler->kill();
         streamHandler->get_exit_status();
+        delete streamHandler;
         streamHandler = nullptr;
     }
 }
@@ -235,7 +247,7 @@ bool FFmpegHandler::probe(const std::string& url) {
     auto output = std::make_shared<std::string>();
 
     streams.clear();
-// -referer "mytest.de" -user_agent "my_user_agent"
+
     // get stream infos
     DEBUG("Starte ffprobe");
     std::vector<std::string> callStr {
