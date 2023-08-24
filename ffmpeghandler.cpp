@@ -193,7 +193,7 @@ bool FFmpegHandler::streamVideo(std::string url, std::string position, std::stri
     DEBUG("Start reader thread");
     readerRunning = true;
     readerThread = new std::thread(startReaderThread, fifo, this, browserClient);
-    // readerThread->detach();
+    readerThread->detach();
 
     return true;
 }
