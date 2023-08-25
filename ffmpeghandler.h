@@ -38,6 +38,7 @@ private:
     int browserPort;
 
     int fifo;
+    std::string fifoFilename;
     bool readerRunning;
 
     std::string cookies;

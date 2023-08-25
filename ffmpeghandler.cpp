@@ -81,7 +81,7 @@ bool FFmpegHandler::streamVideo(std::string url, std::string position, std::stri
     DEBUG("StreamVideo: {} -> {}", position, url);
 
     DEBUG("Create FIFO");
-    std::string fifoFilename = "/tmp/ffmpegts_" + browserIp + "_" + std::to_string(browserPort);
+    fifoFilename = "/tmp/ffmpegts_" + browserIp + "_" + std::to_string(browserPort);
 
     struct stat sb{};
     if(stat(fifoFilename.c_str(), &sb) != -1) {
@@ -230,6 +230,10 @@ void FFmpegHandler::stopVideo() {
         streamHandler->get_exit_status();
         delete streamHandler;
         streamHandler = nullptr;
+    }
+
+    if (!fifoFilename.empty()) {
+        remove(fifoFilename.c_str());
     }
 }
 
