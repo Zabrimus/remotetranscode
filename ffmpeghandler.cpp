@@ -43,19 +43,16 @@ void startReaderThread(int fifo, FFmpegHandler *handler, BrowserClient* client) 
     }
 }
 
-FFmpegHandler::FFmpegHandler(std::string browserIp, int browserPort, TranscodeConfig& tc) : browserIp(browserIp), browserPort(browserPort), transcodeConfig(tc) {
+FFmpegHandler::FFmpegHandler(std::string browserIp, int browserPort, TranscodeConfig& tc, BrowserClient *client) : browserIp(browserIp), browserPort(browserPort), transcodeConfig(tc), browserClient(client) {
     streamHandler = nullptr;
     readerThread = nullptr;
     readerRunning = false;
     fifo = -1;
-
-    browserClient = new BrowserClient(browserIp, browserPort);
 }
 
 FFmpegHandler::~FFmpegHandler() {
     readerRunning = false;
     stopVideo();
-    delete browserClient;
 }
 
 bool FFmpegHandler::probeVideo(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent) {

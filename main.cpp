@@ -9,10 +9,17 @@
 std::string transcoderIp;
 int transcoderPort;
 
+std::string browserIp;
+int browserPort;
+
 httplib::Server transcodeServer;
 
 std::map<std::string, FFmpegHandler*> handler;
+std::map<std::string, BrowserClient*> clients;
+
 std::mutex httpMutex;
+
+BrowserClient* browserClient;
 
 TranscodeConfig transcodeConfig;
 
@@ -49,10 +56,14 @@ void startHttpServer(std::string tIp, int tPort) {
                 handler[streamId]->stopVideo();
             }
 
+            if (clients[streamId] == nullptr) {
+                clients[streamId] = new BrowserClient(responseIp, std::stoi(responsePort));
+            }
+
             delete handler[streamId];
             handler.erase(streamId);
 
-            auto ffmpeg = new FFmpegHandler(responseIp, std::stoi(responsePort), transcodeConfig);
+            auto ffmpeg = new FFmpegHandler(responseIp, std::stoi(responsePort), transcodeConfig, clients[streamId]);
             handler[streamId] = ffmpeg;
 
             DEBUG("Probe video...");

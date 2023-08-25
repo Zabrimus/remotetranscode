@@ -21,7 +21,7 @@ private:
     std::thread *readerThread;
 
 public:
-    FFmpegHandler(std::string browserIp, int browserPort, TranscodeConfig& tc);
+    FFmpegHandler(std::string browserIp, int browserPort, TranscodeConfig& tc, BrowserClient* client);
     ~FFmpegHandler();
 
     bool probeVideo(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent);
