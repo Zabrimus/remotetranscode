@@ -1,5 +1,7 @@
 #include <iostream>
 #include <getopt.h>
+#include <string>
+#include <filesystem>
 #include "mini/ini.h"
 #include "httplib.h"
 #include "logger.h"
@@ -23,6 +25,10 @@ BrowserClient* browserClient;
 
 TranscodeConfig transcodeConfig;
 
+inline bool startsWith(const std::string& str, const std::string& prefix) {
+    return str.size() >= prefix.size() && 0 == str.compare(0, prefix.size(), prefix);
+}
+
 void startHttpServer(std::string tIp, int tPort) {
 
     httplib::Headers headers;
@@ -44,6 +50,7 @@ void startHttpServer(std::string tIp, int tPort) {
         auto userAgent = req.get_param_value("userAgent");
         auto responseIp = req.get_param_value("responseIp");
         auto responsePort = req.get_param_value("responsePort");
+        auto postfix = req.get_param_value("postfix");
 
         if (url.empty() || responseIp.empty() || responsePort.empty()) {
             res.status = 404;
@@ -67,7 +74,7 @@ void startHttpServer(std::string tIp, int tPort) {
             handler[streamId] = ffmpeg;
 
             DEBUG("Probe video...");
-            ffmpeg->probeVideo(url, "0", cookies, referer, userAgent);
+            ffmpeg->probeVideo(url, "0", cookies, referer, userAgent, postfix);
 
             res.status = 200;
             res.set_content("ok", "text/plain");
@@ -262,6 +269,14 @@ int main(int argc, char* argv[]) {
                     exit(-1);
                 }
                 break;
+        }
+    }
+
+    // remove all existing temp. transparent video files
+    std::string path = "movie";
+    for (const auto & entry : std::filesystem::directory_iterator(path)) {
+        if (startsWith(entry.path(), "movie/transparent-video-")) {
+            remove(entry.path());
         }
     }
 

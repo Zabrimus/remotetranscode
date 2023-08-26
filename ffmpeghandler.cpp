@@ -53,18 +53,21 @@ FFmpegHandler::FFmpegHandler(std::string browserIp, int browserPort, TranscodeCo
 FFmpegHandler::~FFmpegHandler() {
     readerRunning = false;
     stopVideo();
+    remove(("movie/" + transparentVideoFile).c_str());
 }
 
-bool FFmpegHandler::probeVideo(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent) {
+bool FFmpegHandler::probeVideo(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent, std::string postfix) {
     bool createPipe = false;
     currentUrl = url;
     this->cookies = cookies;
     this->referer = referer;
     this->userAgent = userAgent;
+    this->postfix = postfix;
 
     // create transparent video
     DEBUG("Create empty video");
-    if (!createVideo(url, "transparent-video-" + browserIp + "_" + std::to_string(browserPort) + ".webm")) {
+    transparentVideoFile = "transparent-video-" + browserIp + "_" + std::to_string(browserPort) + "-" + postfix + ".webm";
+    if (!createVideo(url, transparentVideoFile)) {
         return false;
     }
 
