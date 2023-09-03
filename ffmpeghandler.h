@@ -11,6 +11,7 @@ typedef struct stream_info {
     std::string codec;
     std::string codec_tag;
     std::string sample_rate;
+    std::string bit_rate;
 } stream_info;
 
 class FFmpegHandler {
@@ -24,7 +25,8 @@ public:
     FFmpegHandler(std::string browserIp, int browserPort, TranscodeConfig& tc, BrowserClient* client);
     ~FFmpegHandler();
 
-    bool probeVideo(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent, std::string postfix);
+    std::shared_ptr<std::string>
+    probeVideo(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent, std::string postfix);
     bool streamVideo(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent);
     bool pauseVideo();
     bool resumeVideo(std::string position);
@@ -56,7 +58,7 @@ private:
     TranscodeConfig transcodeConfig;
 
 private:
-    bool probe(const std::string& url);
+    std::shared_ptr<std::string> probe(const std::string& url);
     bool createVideoWithLength(std::string seconds, const std::string& name);
-    bool createVideo(const std::string& url, const std::string& outname);
+    std::shared_ptr<std::string> createVideo(const std::string& url, const std::string& outname);
 };

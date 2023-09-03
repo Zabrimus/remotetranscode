@@ -74,10 +74,10 @@ void startHttpServer(std::string tIp, int tPort) {
             handler[streamId] = ffmpeg;
 
             DEBUG("Probe video...");
-            ffmpeg->probeVideo(url, "0", cookies, referer, userAgent, postfix);
+            auto videoInfo = ffmpeg->probeVideo(url, "0", cookies, referer, userAgent, postfix);
 
             res.status = 200;
-            res.set_content("ok", "text/plain");
+            res.set_content(*videoInfo, "text/plain");
         }
     });
 

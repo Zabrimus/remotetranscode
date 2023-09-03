@@ -43,7 +43,7 @@ void startReaderThread(int fifo, FFmpegHandler *handler, BrowserClient* client) 
     }
 }
 
-FFmpegHandler::FFmpegHandler(std::string browserIp, int browserPort, TranscodeConfig& tc, BrowserClient *client) : browserIp(browserIp), browserPort(browserPort), transcodeConfig(tc), browserClient(client) {
+FFmpegHandler::FFmpegHandler(std::string browserIp, int browserPort, TranscodeConfig& tc, BrowserClient *client) : browserIp(browserIp), browserPort(browserPort), browserClient(client), transcodeConfig(tc) {
     streamHandler = nullptr;
     readerThread = nullptr;
     readerRunning = false;
@@ -56,8 +56,7 @@ FFmpegHandler::~FFmpegHandler() {
     remove(("movie/" + transparentVideoFile).c_str());
 }
 
-bool FFmpegHandler::probeVideo(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent, std::string postfix) {
-    bool createPipe = false;
+std::shared_ptr<std::string> FFmpegHandler::probeVideo(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent, std::string postfix) {
     currentUrl = url;
     this->cookies = cookies;
     this->referer = referer;
@@ -66,12 +65,9 @@ bool FFmpegHandler::probeVideo(std::string url, std::string position, std::strin
 
     // create transparent video
     DEBUG("Create empty video");
-    transparentVideoFile = "transparent-video-" + browserIp + "_" + std::to_string(browserPort) + "-" + postfix + ".webm";
-    if (!createVideo(url, transparentVideoFile)) {
-        return false;
-    }
+    transparentVideoFile = "transparent-video-" + browserIp + "_" + std::to_string(browserPort) + "-" + this->postfix + ".webm";
 
-    return true;
+    return createVideo(url, transparentVideoFile);
 }
 
 bool FFmpegHandler::streamVideo(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent) {
@@ -247,8 +243,9 @@ bool FFmpegHandler::seekTo(std::string pos) {
     return true;
 }
 
-bool FFmpegHandler::probe(const std::string& url) {
+std::shared_ptr<std::string> FFmpegHandler::probe(const std::string& url) {
     auto output = std::make_shared<std::string>();
+    auto videoResult = std::make_shared<std::string>();
 
     streams.clear();
 
@@ -273,6 +270,8 @@ bool FFmpegHandler::probe(const std::string& url) {
 
     DEBUG("OUTPUT( {} ) {}", exit, *output);
 
+    *videoResult = "no video";
+
     std::istringstream input;
     input.str(*output);
     for (std::string line; std::getline(input, line);) {
@@ -287,11 +286,15 @@ bool FFmpegHandler::probe(const std::string& url) {
 
                 if (info.type == "audio") {
                     info.sample_rate = parts[4];
+                    info.bit_rate = parts[5];
                 } else {
                     info.sample_rate = "0";
+                    info.bit_rate = parts[6];
+
+                    *videoResult = info.codec + "/" + info.codec_tag + "/" + parts[4] + "/" + parts[5];
                 }
 
-                DEBUG("Found stream: {}, {}, {}", info.type, info.codec, info.codec_tag, info.sample_rate);
+                DEBUG("Found stream: {}, {}, {}, {}, {}", info.type, info.codec, info.codec_tag, info.sample_rate, info.bit_rate);
 
                 streams.push_back(info);
             } else if (parts[0] == "format") {
@@ -302,7 +305,7 @@ bool FFmpegHandler::probe(const std::string& url) {
         }
     }
 
-    return true;
+    return videoResult;
 }
 
 bool FFmpegHandler::createVideoWithLength(std::string seconds, const std::string& name) {
@@ -338,22 +341,22 @@ bool FFmpegHandler::createVideoWithLength(std::string seconds, const std::string
     }
 }
 
-bool FFmpegHandler::createVideo(const std::string& url, const std::string& outname) {
+std::shared_ptr<std::string> FFmpegHandler::createVideo(const std::string& url, const std::string& outname) {
     struct stat sb{};
     if ((stat(outname.c_str(), &sb) != -1) && (remove(outname.c_str()) != 0)) {
         ERROR("File {} exists and delete failed. Aborting...\n", outname.c_str());
-        return false;
+        return nullptr;
     }
 
-    if (probe(url)) {
-        if (!duration.empty()) {
-            return createVideoWithLength(duration, outname);
-        } else {
-            ERROR("Duration is empty");
+    std::shared_ptr<std::string> videoInfo = probe(url);
+
+    if (!duration.empty()) {
+        if (createVideoWithLength(duration, outname)) {
+            return videoInfo;
         }
     } else {
-        ERROR("Probe failed");
+        ERROR("Duration is empty");
     }
 
-    return false;
+    return nullptr;
 }
