@@ -76,8 +76,14 @@ void startHttpServer(std::string tIp, int tPort) {
             DEBUG("Probe video...");
             auto videoInfo = ffmpeg->probeVideo(url, "0", cookies, referer, userAgent, postfix);
 
-            res.status = 200;
-            res.set_content(*videoInfo, "text/plain");
+            if (videoInfo == nullptr) {
+                res.status = 500;
+                res.set_content("Unable to probe video", "text/plain");
+
+            } else {
+                res.status = 200;
+                res.set_content(*videoInfo, "text/plain");
+            }
         }
     });
 

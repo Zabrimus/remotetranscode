@@ -259,7 +259,7 @@ std::shared_ptr<std::string> FFmpegHandler::probe(const std::string& url) {
         "-headers", "Cookie: " + cookies,
         "-print_format", "csv",
         "-show_entries", "format=duration",
-        "-show_entries", "stream=codec_type,codec_name,bit_rate,sample_rate,codec_tag_string"
+        "-show_entries", "stream=codec_type,codec_name,bit_rate,sample_rate,codec_tag_string,width,height,bit_rate"
     };
 
     TinyProcessLib::Process process(callStr, "", [output](const char *bytes, size_t n) {
@@ -287,11 +287,13 @@ std::shared_ptr<std::string> FFmpegHandler::probe(const std::string& url) {
                 if (info.type == "audio") {
                     info.sample_rate = parts[4];
                     info.bit_rate = parts[5];
-                } else {
+                } else if (info.type == "video") {
                     info.sample_rate = "0";
                     info.bit_rate = parts[6];
 
                     *videoResult = info.codec + "/" + info.codec_tag + "/" + parts[4] + "/" + parts[5];
+                } else {
+                    // ignore this
                 }
 
                 DEBUG("Found stream: {}, {}, {}, {}, {}", info.type, info.codec, info.codec_tag, info.sample_rate, info.bit_rate);
