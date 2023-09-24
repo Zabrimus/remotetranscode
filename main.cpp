@@ -178,11 +178,12 @@ void startHttpServer(std::string tIp, int tPort) {
         std::lock_guard<std::mutex> guard(httpMutex);
 
         auto streamId = req.get_param_value("streamId");
+        auto reason = req.get_param_value("reason");
 
         if (streamId.empty()) {
             res.status = 404;
         } else {
-            INFO("Stop streamId {}", streamId);
+            INFO("Stop streamId {}, reason {}", streamId, reason);
 
             if (handler[streamId] != nullptr) {
                 handler[streamId]->stopVideo();
