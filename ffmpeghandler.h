@@ -34,6 +34,7 @@ public:
     bool seekTo(std::string pos);
 
     bool isRunning() { return readerRunning; };
+    bool hasStreamError() { return streamError; };
 
 private:
     std::string browserIp;
@@ -42,6 +43,7 @@ private:
     int fifo;
     std::string fifoFilename;
     bool readerRunning;
+    bool streamError;
 
     std::string cookies;
     std::string referer;

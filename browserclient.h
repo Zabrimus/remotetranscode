@@ -9,6 +9,7 @@ public:
     ~BrowserClient();
 
     bool ProcessTSPacket(std::string packet);
+    bool StreamError(std::string reason);
 
 private:
     httplib::Client* client;

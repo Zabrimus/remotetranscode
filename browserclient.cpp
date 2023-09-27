@@ -25,3 +25,21 @@ bool BrowserClient::ProcessTSPacket(std::string packet) {
     return true;
 }
 
+bool BrowserClient::StreamError(std::string reason) {
+    httplib::Params params;
+    params.emplace("reason", reason);
+
+    if (auto res = client->Post("/StreamError", params)) {
+        if (res->status != 200) {
+            INFO("[remotetranscoder] Http result(StreamError): {}", res->status);
+            return false;
+        }
+    } else {
+        auto err = res.error();
+        ERROR("[remotetranscoder] Http error(StreamError): {}", httplib::to_string(err));
+        return false;
+    }
+
+    return true;
+}
+

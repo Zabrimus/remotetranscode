@@ -31,6 +31,11 @@ void startReaderThread(int fifo, FFmpegHandler *handler, BrowserClient* client) 
     INFO("Start reader thread...");
 
     while (handler->isRunning()) {
+        if (handler->hasStreamError()) {
+            client->StreamError("Encrypted Stream");
+            break;
+        }
+
         if ((bytes = read(fifo, buffer, sizeof(buffer))) > 0) {
             if (!client->ProcessTSPacket(std::string(buffer, bytes))) {
                 // connection problems? abort transcoding
@@ -47,11 +52,13 @@ FFmpegHandler::FFmpegHandler(std::string browserIp, int browserPort, TranscodeCo
     streamHandler = nullptr;
     readerThread = nullptr;
     readerRunning = false;
+    streamError = false;
     fifo = -1;
 }
 
 FFmpegHandler::~FFmpegHandler() {
     readerRunning = false;
+    streamError = false;
     stopVideo();
     remove(("movie/" + transparentVideoFile).c_str());
 }
@@ -180,7 +187,7 @@ bool FFmpegHandler::streamVideo(std::string url, std::string position, std::stri
         true
     );
 
-    if ((fifo = open(fifoFilename.c_str(), O_RDONLY)) < 0) {
+    if ((fifo = open(fifoFilename.c_str(), O_RDONLY | O_NONBLOCK)) < 0) {
         ERROR("FFmpegHandler::streamVideo: {}", strerror(errno));
         return false;
     }
