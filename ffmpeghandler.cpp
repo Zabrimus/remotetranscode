@@ -129,6 +129,45 @@ bool FFmpegHandler::streamVideo(std::string url, std::string position, std::stri
     int audioStreamId = 0;
     int videoStreamId = 0;
 
+    // find best video stream
+    int maxVideoBitrate = 0;
+    int maxVideoBitrateIndex = -1;
+    for (const auto& s : streams) {
+        if (s.type == "video") {
+            if (std::atoi(s.bit_rate.c_str()) > maxVideoBitrate) {
+                maxVideoBitrate = std::atoi(s.bit_rate.c_str());
+                maxVideoBitrateIndex = videoStreamId;
+            }
+            videoStreamId++;
+        }
+    }
+
+    videoStreamId = 0;
+
+    DEBUG("Video stream with max bitrate {}, index {}", maxVideoBitrate, maxVideoBitrateIndex);
+
+    // add best video stream
+    if (maxVideoBitrateIndex >= 0) {
+        auto bestVideoStream = streams.at(maxVideoBitrateIndex);
+
+        callStr.emplace_back("-map");
+        callStr.emplace_back("0:v:" + std::to_string(maxVideoBitrateIndex));
+        callStr.emplace_back("-c:v:" + std::to_string(maxVideoBitrateIndex));
+
+        if (transcodeConfig.isCopyVideo(bestVideoStream.codec)) {
+            callStr.emplace_back("copy");
+
+            if (bestVideoStream.codec == "h264" && bestVideoStream.codec_tag == "avc1") {
+                callStr.emplace_back("-bsf:v");
+                callStr.emplace_back("h264_mp4toannexb");
+            }
+        } else {
+            auto videoParameter = transcodeConfig.getVideoTranscodeParameter();
+            callStr.insert(callStr.end(), videoParameter.begin(), videoParameter.end());
+        }
+    }
+
+    // add audio streams
     for (const auto& s : streams) {
         if (s.type == "audio") {
             callStr.emplace_back("-map");
@@ -143,24 +182,6 @@ bool FFmpegHandler::streamVideo(std::string url, std::string position, std::stri
             }
 
             audioStreamId++;
-        } else if (s.type == "video") {
-            callStr.emplace_back("-map");
-            callStr.emplace_back("0:v:" + std::to_string(videoStreamId));
-            callStr.emplace_back("-c:v:" + std::to_string(videoStreamId));
-
-            if (transcodeConfig.isCopyVideo(s.codec)) {
-                callStr.emplace_back("copy");
-
-                if (s.codec == "h264" && s.codec_tag == "avc1") {
-                    callStr.emplace_back("-bsf:v");
-                    callStr.emplace_back("h264_mp4toannexb");
-                }
-            } else {
-                auto videoParameter = transcodeConfig.getVideoTranscodeParameter();
-                callStr.insert(callStr.end(), videoParameter.begin(), videoParameter.end());
-            }
-
-            videoStreamId++;
         }
     }
 
@@ -181,7 +202,16 @@ bool FFmpegHandler::streamVideo(std::string url, std::string position, std::stri
             DEBUG("{}", std::string(bytes, n));
         },
 
-        [](const char *bytes, size_t n) {
+        [this](const char *bytes, size_t n) {
+            // catch errors
+            std::string msg = std::string(bytes, n);
+
+            if (msg.find("Failed to seek for auxiliary info") != std::string::npos) {
+                // stop reader thread
+                fprintf(stderr, "===> Error. Try to stop\n");
+                streamError = true;
+            }
+
             DEBUG("{}", std::string(bytes, n));
         },
         true
@@ -275,6 +305,13 @@ std::shared_ptr<std::string> FFmpegHandler::probe(const std::string& url) {
 
     int exit = process.get_exit_status();
 
+    std::ostringstream paramOut;
+    if (!callStr.empty()) {
+        std::copy(callStr.begin(), callStr.end() - 1, std::ostream_iterator<std::string>(paramOut, " "));
+        paramOut << callStr.back();
+    }
+
+    DEBUG("Call ffprobe: {}", paramOut.str());
     DEBUG("OUTPUT( {} ) {}", exit, *output);
 
     *videoResult = "no video";
@@ -282,6 +319,12 @@ std::shared_ptr<std::string> FFmpegHandler::probe(const std::string& url) {
     std::istringstream input;
     input.str(*output);
     for (std::string line; std::getline(input, line);) {
+        if (line.length() == 0) {
+            // reset streams (ffprobe is a bit strange)
+            streams.clear();
+            continue;
+        }
+
         auto parts = split(line, ",");
 
         if (!parts.empty()) {
