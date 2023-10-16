@@ -48,7 +48,7 @@ void startReaderThread(int fifo, FFmpegHandler *handler, BrowserClient* client) 
     }
 }
 
-FFmpegHandler::FFmpegHandler(std::string browserIp, int browserPort, TranscodeConfig& tc, BrowserClient *client) : browserIp(browserIp), browserPort(browserPort), browserClient(client), transcodeConfig(tc) {
+FFmpegHandler::FFmpegHandler(std::string browserIp, int browserPort, TranscodeConfig& tc, BrowserClient *client, std::string movie_path) : browserIp(browserIp), browserPort(browserPort), browserClient(client), transcodeConfig(tc), movie_path(movie_path) {
     streamHandler = nullptr;
     readerThread = nullptr;
     readerRunning = false;
@@ -60,7 +60,7 @@ FFmpegHandler::~FFmpegHandler() {
     readerRunning = false;
     streamError = false;
     stopVideo();
-    remove(("movie/" + transparentVideoFile).c_str());
+    remove((movie_path + "/" + transparentVideoFile).c_str());
 }
 
 std::shared_ptr<std::string> FFmpegHandler::probeVideo(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent, std::string postfix) {
@@ -368,7 +368,7 @@ bool FFmpegHandler::createVideoWithLength(std::string seconds, const std::string
     }
 
     std::vector<std::string> callStr {
-        "ffmpeg", "-hide_banner" , "-y", "-i", "movie/transparent-full.webm", "-t", seconds, "-codec", "copy", "movie/" + name
+        "ffmpeg", "-hide_banner" , "-y", "-i", movie_path + "/transparent-full.webm", "-t", seconds, "-codec", "copy", movie_path + "/" + name
     };
 
     TinyProcessLib::Process process(callStr, "",

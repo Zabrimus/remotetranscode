@@ -29,19 +29,19 @@ inline bool startsWith(const std::string& str, const std::string& prefix) {
     return str.size() >= prefix.size() && 0 == str.compare(0, prefix.size(), prefix);
 }
 
-void startHttpServer(std::string tIp, int tPort) {
+void startHttpServer(std::string tIp, int tPort, std::string movie_path) {
 
     httplib::Headers headers;
     headers.emplace("Cache-Control", "no-cache");
 
-    auto ret = transcodeServer.set_mount_point("/movie", "./movie", headers);
+    auto ret = transcodeServer.set_mount_point("/movie", movie_path, headers);
     if (!ret) {
         // must not happen
-        ERROR("http mount point ./movie does not exists. Application will not work as desired.");
+        ERROR("http mount point " + movie_path + " does not exists. Application will not work as desired.");
         return;
     }
 
-    transcodeServer.Post("/Probe", [](const httplib::Request &req, httplib::Response &res) {
+    transcodeServer.Post("/Probe", [movie_path](const httplib::Request &req, httplib::Response &res) {
         std::lock_guard<std::mutex> guard(httpMutex);
 
         auto url = req.get_param_value("url");
@@ -70,7 +70,7 @@ void startHttpServer(std::string tIp, int tPort) {
             delete handler[streamId];
             handler.erase(streamId);
 
-            auto ffmpeg = new FFmpegHandler(responseIp, std::stoi(responsePort), transcodeConfig, clients[streamId]);
+            auto ffmpeg = new FFmpegHandler(responseIp, std::stoi(responsePort), transcodeConfig, clients[streamId], movie_path);
             handler[streamId] = ffmpeg;
 
             DEBUG("Probe video...");
@@ -252,18 +252,21 @@ bool readCodecFile(const char* codecFile) {
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " -c <config_file> -t <transcode_file>" << std::endl;
+        std::cerr << "Usage: " << argv[0] << " -c <config_file> -t <transcode_file> -m <movie_path>" << std::endl;
         return -1;
     }
+
+    std::string movie_path = "./movie"; // default value
 
     static struct option long_options[] = {
             { "config",      required_argument, nullptr, 'c' },
             { "transcode",   optional_argument, nullptr, 't' },
+            { "movie",       optional_argument, nullptr, 'm' },
             {nullptr }
     };
 
     int c, option_index = 0;
-    while ((c = getopt_long(argc, argv, "c:t:", long_options, &option_index)) != -1) {
+    while ((c = getopt_long(argc, argv, "c:t:m:", long_options, &option_index)) != -1) {
         switch (c) {
             case 'c':
                 if (!readConfiguration(optarg)) {
@@ -276,19 +279,22 @@ int main(int argc, char* argv[]) {
                     exit(-1);
                 }
                 break;
+
+            case 'm':
+                movie_path = std::string(optarg);
+                break;
         }
     }
 
     // remove all existing temp. transparent video files
-    std::string path = "movie";
-    for (const auto & entry : std::filesystem::directory_iterator(path)) {
-        if (startsWith(entry.path(), "movie/transparent-video-")) {
+    for (const auto & entry : std::filesystem::directory_iterator(movie_path)) {
+        if (startsWith(entry.path(), movie_path + "/transparent-video-")) {
             remove(entry.path());
         }
     }
 
     // start server
-    std::thread t1(startHttpServer, transcoderIp, transcoderPort);
+    std::thread t1(startHttpServer, transcoderIp, transcoderPort, movie_path);
     t1.join();
 
     return 0;

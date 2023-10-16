@@ -22,7 +22,7 @@ private:
     std::thread *readerThread;
 
 public:
-    FFmpegHandler(std::string browserIp, int browserPort, TranscodeConfig& tc, BrowserClient* client);
+    FFmpegHandler(std::string browserIp, int browserPort, TranscodeConfig& tc, BrowserClient* client, std::string movie_path);
     ~FFmpegHandler();
 
     std::shared_ptr<std::string>
@@ -58,6 +58,7 @@ private:
     BrowserClient* browserClient;
 
     TranscodeConfig transcodeConfig;
+    std::string movie_path;
 
 private:
     std::shared_ptr<std::string> probe(const std::string& url);
