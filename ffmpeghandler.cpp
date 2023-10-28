@@ -208,11 +208,10 @@ bool FFmpegHandler::streamVideo(std::string url, std::string position, std::stri
 
             if (msg.find("Failed to seek for auxiliary info") != std::string::npos) {
                 // stop reader thread
-                fprintf(stderr, "===> Error. Try to stop\n");
                 streamError = true;
             }
 
-            DEBUG("{}", std::string(bytes, n));
+            TRACE("{}", std::string(bytes, n));
         },
         true
     );

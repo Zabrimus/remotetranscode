@@ -262,11 +262,12 @@ int main(int argc, char* argv[]) {
             { "config",      required_argument, nullptr, 'c' },
             { "transcode",   optional_argument, nullptr, 't' },
             { "movie",       optional_argument, nullptr, 'm' },
+            { "loglevel",    optional_argument, nullptr, 'l' },
             {nullptr }
     };
 
-    int c, option_index = 0;
-    while ((c = getopt_long(argc, argv, "c:t:m:", long_options, &option_index)) != -1) {
+    int c, option_index = 0, loglevel = 1;
+    while ((c = getopt_long(argc, argv, "c:t:m:l:", long_options, &option_index)) != -1) {
         switch (c) {
             case 'c':
                 if (!readConfiguration(optarg)) {
@@ -283,7 +284,20 @@ int main(int argc, char* argv[]) {
             case 'm':
                 movie_path = std::string(optarg);
                 break;
+
+            case 'l':
+                loglevel = atoi(optarg);
+                break;
         }
+    }
+
+    switch (loglevel) {
+        case 0:  logger.set_level(spdlog::level::critical); break;
+        case 1:  logger.set_level(spdlog::level::err); break;
+        case 2:  logger.set_level(spdlog::level::info); break;
+        case 3:  logger.set_level(spdlog::level::debug); break;
+        case 4:  logger.set_level(spdlog::level::trace); break;
+        default: logger.set_level(spdlog::level::err); break;
     }
 
     // remove all existing temp. transparent video files

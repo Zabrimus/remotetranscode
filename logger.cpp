@@ -4,8 +4,7 @@
 Logger::Logger() {
     spdlog::cfg::load_env_levels();
     _logger =  spdlog::stdout_color_mt("transcoder");
-    // _logger->set_level(spdlog::level::trace);
-    _logger->set_level(spdlog::level::debug);
+    _logger->set_level(spdlog::level::err);
 }
 
 Logger::~Logger() {
