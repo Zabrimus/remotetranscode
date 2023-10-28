@@ -33,7 +33,11 @@ public:
     }
 
     inline bool isDebugEnabled() {
-        return _logger->level() == spdlog::level::debug;
+        return (_logger->level() == spdlog::level::debug) || (_logger->level() == spdlog::level::trace);
+    }
+
+    inline bool isInfoEnabled() {
+        return (_logger->level() == spdlog::level::info) || (_logger->level() == spdlog::level::debug) || (_logger->level() == spdlog::level::trace);
     }
 
     inline spdlog::level::level_enum level() {
