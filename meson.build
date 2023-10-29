@@ -28,7 +28,7 @@ mini_dep = mini_proj.get_variable('mini_dep')
 
 
 
-exe = executable('remotrans', 'main.cpp', 'logger.cpp', 'ffmpeghandler.cpp', 'browserclient.cpp', 'transcodeconfig.cpp',
+exe = executable('remotrans', 'main.cpp', 'logger.cpp', 'ffmpeghandler.cpp', 'browserclient.cpp', 'transcodeconfig.cpp', 'vdrclient.cpp',
                  install : false,
                  dependencies: [mini_dep, spdlog_dep, tiny_process_library_dep])
 

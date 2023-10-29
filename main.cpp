@@ -50,9 +50,11 @@ void startHttpServer(std::string tIp, int tPort, std::string movie_path) {
         auto userAgent = req.get_param_value("userAgent");
         auto responseIp = req.get_param_value("responseIp");
         auto responsePort = req.get_param_value("responsePort");
+        auto vdrIp = req.get_param_value("vdrIp");
+        auto vdrPort = req.get_param_value("vdrPort");
         auto postfix = req.get_param_value("postfix");
 
-        if (url.empty() || responseIp.empty() || responsePort.empty()) {
+        if (url.empty() || responseIp.empty() || responsePort.empty() || vdrIp.empty() || vdrPort.empty()) {
             res.status = 404;
         } else {
             INFO("Probe {}", url);
@@ -70,7 +72,7 @@ void startHttpServer(std::string tIp, int tPort, std::string movie_path) {
             delete handler[streamId];
             handler.erase(streamId);
 
-            auto ffmpeg = new FFmpegHandler(responseIp, std::stoi(responsePort), transcodeConfig, clients[streamId], movie_path);
+            auto ffmpeg = new FFmpegHandler(responseIp, std::stoi(responsePort), vdrIp, std::stoi(vdrPort), transcodeConfig, clients[streamId], movie_path);
             handler[streamId] = ffmpeg;
 
             DEBUG("Probe video...");
@@ -96,6 +98,8 @@ void startHttpServer(std::string tIp, int tPort, std::string movie_path) {
         auto userAgent = req.get_param_value("userAgent");
         auto responseIp = req.get_param_value("responseIp");
         auto responsePort = req.get_param_value("responsePort");
+        auto vdrIp = req.get_param_value("vdrIp");
+        auto vdrPort = req.get_param_value("vdrPort");
 
         if (url.empty() || responseIp.empty() || responsePort.empty()) {
             res.status = 404;

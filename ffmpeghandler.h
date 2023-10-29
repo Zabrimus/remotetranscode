@@ -4,6 +4,7 @@
 #include <thread>
 #include "process.hpp"
 #include "browserclient.h"
+#include "vdrclient.h"
 #include "transcodeconfig.h"
 
 typedef struct stream_info {
@@ -22,7 +23,7 @@ private:
     std::thread *readerThread;
 
 public:
-    FFmpegHandler(std::string browserIp, int browserPort, TranscodeConfig& tc, BrowserClient* client, std::string movie_path);
+    FFmpegHandler(std::string browserIp, int browserPort, std::string vdrIp, int vdrPort, TranscodeConfig& tc, BrowserClient* client, std::string movie_path);
     ~FFmpegHandler();
 
     std::shared_ptr<std::string>
@@ -56,6 +57,7 @@ private:
     std::string currentUrl;
 
     BrowserClient* browserClient;
+    VdrClient* vdrClient;
 
     TranscodeConfig transcodeConfig;
     std::string movie_path;

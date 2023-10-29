@@ -22,7 +22,7 @@ std::vector<std::string> split(std::string s, std::string delimiter) {
     return res;
 }
 
-void startReaderThread(int fifo, FFmpegHandler *handler, BrowserClient* client) {
+void startReaderThread(int fifo, FFmpegHandler *handler, BrowserClient* client, VdrClient *vdr) {
     const auto wait_duration = std::chrono::milliseconds(10) ;
 
     ssize_t bytes;
@@ -37,9 +37,9 @@ void startReaderThread(int fifo, FFmpegHandler *handler, BrowserClient* client) 
         }
 
         if ((bytes = read(fifo, buffer, sizeof(buffer))) > 0) {
-            if (!client->ProcessTSPacket(std::string(buffer, bytes))) {
+            if (!vdr->ProcessTSPacket(std::string(buffer, bytes))) {
                 // connection problems? abort transcoding
-                ERROR("Unable to connect to browser. Abort transcoding...");
+                ERROR("Unable to connect to vdr. Abort transcoding...");
                 handler->stopVideo();
             }
         } else {
@@ -48,12 +48,13 @@ void startReaderThread(int fifo, FFmpegHandler *handler, BrowserClient* client) 
     }
 }
 
-FFmpegHandler::FFmpegHandler(std::string browserIp, int browserPort, TranscodeConfig& tc, BrowserClient *client, std::string movie_path) : browserIp(browserIp), browserPort(browserPort), browserClient(client), transcodeConfig(tc), movie_path(movie_path) {
+FFmpegHandler::FFmpegHandler(std::string browserIp, int browserPort, std::string vdrIp, int vdrPort, TranscodeConfig& tc, BrowserClient *client, std::string movie_path) : browserIp(browserIp), browserPort(browserPort), browserClient(client), transcodeConfig(tc), movie_path(movie_path) {
     streamHandler = nullptr;
     readerThread = nullptr;
     readerRunning = false;
     streamError = false;
     fifo = -1;
+    vdrClient = new VdrClient(vdrIp, vdrPort);
 }
 
 FFmpegHandler::~FFmpegHandler() {
@@ -61,6 +62,7 @@ FFmpegHandler::~FFmpegHandler() {
     streamError = false;
     stopVideo();
     remove((movie_path + "/" + transparentVideoFile).c_str());
+    delete vdrClient;
 }
 
 std::shared_ptr<std::string> FFmpegHandler::probeVideo(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent, std::string postfix) {
@@ -224,7 +226,7 @@ bool FFmpegHandler::streamVideo(std::string url, std::string position, std::stri
     // start reader thread
     DEBUG("Start reader thread");
     readerRunning = true;
-    readerThread = new std::thread(startReaderThread, fifo, this, browserClient);
+    readerThread = new std::thread(startReaderThread, fifo, this, browserClient, vdrClient);
     readerThread->detach();
 
     return true;
