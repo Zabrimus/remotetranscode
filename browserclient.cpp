@@ -43,3 +43,18 @@ bool BrowserClient::StreamError(std::string reason) {
     return true;
 }
 
+bool BrowserClient::Heartbeat() {
+    if (auto res = client->Get("/Heartbeat")) {
+        if (res->status != 200) {
+            INFO("[remotetranscoder] Heartbeat, Http result(StreamError): {}", res->status);
+            return false;
+        }
+    } else {
+        auto err = res.error();
+        ERROR("[remotetranscoder] Heartbeat, Http error(StreamError): {}", httplib::to_string(err));
+        return false;
+    }
+
+    return true;
+}
+

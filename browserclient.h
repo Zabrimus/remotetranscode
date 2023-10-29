@@ -10,6 +10,7 @@ public:
 
     bool ProcessTSPacket(std::string packet);
     bool StreamError(std::string reason);
+    bool Heartbeat();
 
 private:
     httplib::Client* client;

@@ -37,6 +37,12 @@ void startReaderThread(int fifo, FFmpegHandler *handler, BrowserClient* client, 
         }
 
         if ((bytes = read(fifo, buffer, sizeof(buffer))) > 0) {
+            if (!client->Heartbeat()) {
+                // connection problems? abort transcoding
+                ERROR("Unable to connect to browser. Abort transcoding...");
+                handler->stopVideo();
+            }
+
             if (!vdr->ProcessTSPacket(std::string(buffer, bytes))) {
                 // connection problems? abort transcoding
                 ERROR("Unable to connect to vdr. Abort transcoding...");
