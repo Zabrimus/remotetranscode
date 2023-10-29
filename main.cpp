@@ -25,11 +25,25 @@ BrowserClient* browserClient;
 
 TranscodeConfig transcodeConfig;
 
+std::string readFile(std::string_view path) {
+    constexpr auto read_size = std::size_t{4096};
+    auto stream = std::ifstream{path.data()};
+    stream.exceptions(std::ios_base::badbit);
+
+    auto out = std::string{};
+    auto buf = std::string(read_size, '\0');
+    while (stream.read(& buf[0], read_size)) {
+        out.append(buf, 0, stream.gcount());
+    }
+    out.append(buf, 0, stream.gcount());
+    return out;
+}
+
 inline bool startsWith(const std::string& str, const std::string& prefix) {
     return str.size() >= prefix.size() && 0 == str.compare(0, prefix.size(), prefix);
 }
 
-void startHttpServer(std::string tIp, int tPort, std::string movie_path) {
+void startHttpServer(std::string tIp, int tPort, std::string movie_path, std::string transparentMovie) {
 
     httplib::Headers headers;
     headers.emplace("Cache-Control", "no-cache");
@@ -41,7 +55,7 @@ void startHttpServer(std::string tIp, int tPort, std::string movie_path) {
         return;
     }
 
-    transcodeServer.Post("/Probe", [movie_path](const httplib::Request &req, httplib::Response &res) {
+    transcodeServer.Post("/Probe", [movie_path, transparentMovie](const httplib::Request &req, httplib::Response &res) {
         std::lock_guard<std::mutex> guard(httpMutex);
 
         auto url = req.get_param_value("url");
@@ -72,7 +86,7 @@ void startHttpServer(std::string tIp, int tPort, std::string movie_path) {
             delete handler[streamId];
             handler.erase(streamId);
 
-            auto ffmpeg = new FFmpegHandler(responseIp, std::stoi(responsePort), vdrIp, std::stoi(vdrPort), transcodeConfig, clients[streamId], movie_path);
+            auto ffmpeg = new FFmpegHandler(responseIp, std::stoi(responsePort), vdrIp, std::stoi(vdrPort), transcodeConfig, clients[streamId], movie_path, transparentMovie);
             handler[streamId] = ffmpeg;
 
             DEBUG("Probe video...");
@@ -311,8 +325,11 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // read whole transparent file into memory
+    std::string transparentMovie = readFile(movie_path + "/transparent-full.webm");
+
     // start server
-    std::thread t1(startHttpServer, transcoderIp, transcoderPort, movie_path);
+    std::thread t1(startHttpServer, transcoderIp, transcoderPort, movie_path, transparentMovie);
     t1.join();
 
     return 0;

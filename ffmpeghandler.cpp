@@ -54,7 +54,7 @@ void startReaderThread(int fifo, FFmpegHandler *handler, BrowserClient* client, 
     }
 }
 
-FFmpegHandler::FFmpegHandler(std::string browserIp, int browserPort, std::string vdrIp, int vdrPort, TranscodeConfig& tc, BrowserClient *client, std::string movie_path) : browserIp(browserIp), browserPort(browserPort), browserClient(client), transcodeConfig(tc), movie_path(movie_path) {
+FFmpegHandler::FFmpegHandler(std::string browserIp, int browserPort, std::string vdrIp, int vdrPort, TranscodeConfig& tc, BrowserClient *client, std::string movie_path, const std::string& tmovie) : browserIp(browserIp), browserPort(browserPort), browserClient(client), transcodeConfig(tc), movie_path(movie_path), transparent_movie(tmovie) {
     streamHandler = nullptr;
     readerThread = nullptr;
     readerRunning = false;
@@ -369,24 +369,27 @@ std::shared_ptr<std::string> FFmpegHandler::probe(const std::string& url) {
 
 bool FFmpegHandler::createVideoWithLength(std::string seconds, const std::string& name) {
     auto output = std::make_shared<std::string>();
+    auto video = std::make_shared<std::string>();
 
     if (seconds == "N/A") {
         seconds = "08:00:00.000000000";
     }
 
     std::vector<std::string> callStr {
-        "ffmpeg", "-hide_banner" , "-y", "-i", movie_path + "/transparent-full.webm", "-t", seconds, "-codec", "copy", movie_path + "/" + name
+        "ffmpeg", "-hide_banner" , "-y", "-i", "pipe:0", "-t", seconds, "-codec", "copy", movie_path + "/" + name // "-f", "webm", "pipe:1" //movie_path + "/" + name
     };
 
     TinyProcessLib::Process process(callStr, "",
-                                    [output](const char *bytes, size_t n) {
-                                        // *output += std::string(bytes, n);
+                                    [output, video](const char *bytes, size_t n) {
+                                        *video += std::string(bytes, n);
                                     },
                                     [output](const char *bytes, size_t n) {
                                         *output += std::string(bytes, n);
                                     },
                                     true
     );
+
+    process.write(transparent_movie);
 
     int exit = process.get_exit_status();
 
