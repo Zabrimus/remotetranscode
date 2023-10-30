@@ -48,13 +48,6 @@ void startHttpServer(std::string tIp, int tPort, std::string movie_path, std::st
     httplib::Headers headers;
     headers.emplace("Cache-Control", "no-cache");
 
-    auto ret = transcodeServer.set_mount_point("/movie", movie_path, headers);
-    if (!ret) {
-        // must not happen
-        ERROR("http mount point " + movie_path + " does not exists. Application will not work as desired.");
-        return;
-    }
-
     transcodeServer.Post("/Probe", [movie_path, transparentMovie](const httplib::Request &req, httplib::Response &res) {
         std::lock_guard<std::mutex> guard(httpMutex);
 
@@ -95,7 +88,6 @@ void startHttpServer(std::string tIp, int tPort, std::string movie_path, std::st
             if (videoInfo == nullptr) {
                 res.status = 500;
                 res.set_content("Unable to probe video", "text/plain");
-
             } else {
                 res.status = 200;
                 res.set_content(*videoInfo, "text/plain");
@@ -213,6 +205,15 @@ void startHttpServer(std::string tIp, int tPort, std::string movie_path, std::st
             res.status = 200;
             res.set_content("ok", "text/plain");
         }
+    });
+
+    transcodeServer.Get(R"(/movie/(.*))", [](const httplib::Request &req, httplib::Response &res) {
+        std::lock_guard<std::mutex> guard(httpMutex);
+
+        auto name = req.matches[1];
+
+        res.status = 200;
+        res.set_content(transparentVideos[name.str()], "video/webm");
     });
 
     if (!transcodeServer.listen(tIp, tPort)) {

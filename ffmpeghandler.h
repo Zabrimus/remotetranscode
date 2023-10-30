@@ -7,6 +7,8 @@
 #include "vdrclient.h"
 #include "transcodeconfig.h"
 
+extern std::map<std::string, std::string> transparentVideos;
+
 typedef struct stream_info {
     std::string type;
     std::string codec;
@@ -36,6 +38,8 @@ public:
 
     bool hasStreamError() { return streamError; };
     bool stopHandler() { return stopRequest; };
+
+    std::string getVideoName() { return transparentVideoFile; };
 
 private:
     std::string browserIp;
