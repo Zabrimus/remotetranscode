@@ -34,17 +34,15 @@ public:
     void stopVideo();
     bool seekTo(std::string pos);
 
-    bool isRunning() { return readerRunning; };
     bool hasStreamError() { return streamError; };
+    bool stopHandler() { return stopRequest; };
 
 private:
     std::string browserIp;
     int browserPort;
 
-    int fifo;
-    std::string fifoFilename;
-    bool readerRunning;
     bool streamError;
+    bool stopRequest;
 
     std::string cookies;
     std::string referer;

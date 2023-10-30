@@ -22,50 +22,16 @@ std::vector<std::string> split(std::string s, std::string delimiter) {
     return res;
 }
 
-void startReaderThread(int fifo, FFmpegHandler *handler, BrowserClient* client, VdrClient *vdr) {
-    const auto wait_duration = std::chrono::milliseconds(10) ;
-
-    ssize_t bytes;
-    char buffer[32712];
-
-    INFO("Start reader thread...");
-
-    while (handler->isRunning()) {
-        if (handler->hasStreamError()) {
-            client->StreamError("Encrypted Stream");
-            break;
-        }
-
-        if ((bytes = read(fifo, buffer, sizeof(buffer))) > 0) {
-            if (!client->Heartbeat()) {
-                // connection problems? abort transcoding
-                ERROR("Unable to connect to browser. Abort transcoding...");
-                handler->stopVideo();
-            }
-
-            if (!vdr->ProcessTSPacket(std::string(buffer, bytes))) {
-                // connection problems? abort transcoding
-                ERROR("Unable to connect to vdr. Abort transcoding...");
-                handler->stopVideo();
-            }
-        } else {
-            std::this_thread::sleep_for(wait_duration);
-        }
-    }
-}
-
 FFmpegHandler::FFmpegHandler(std::string browserIp, int browserPort, std::string vdrIp, int vdrPort, TranscodeConfig& tc, BrowserClient *client, std::string movie_path, const std::string& tmovie) : browserIp(browserIp), browserPort(browserPort), browserClient(client), transcodeConfig(tc), movie_path(movie_path), transparent_movie(tmovie) {
     streamHandler = nullptr;
-    readerThread = nullptr;
-    readerRunning = false;
     streamError = false;
-    fifo = -1;
+    stopRequest = false;
     vdrClient = new VdrClient(vdrIp, vdrPort);
 }
 
 FFmpegHandler::~FFmpegHandler() {
-    readerRunning = false;
     streamError = false;
+    stopRequest = false;
     stopVideo();
     remove((movie_path + "/" + transparentVideoFile).c_str());
     delete vdrClient;
@@ -86,7 +52,6 @@ std::shared_ptr<std::string> FFmpegHandler::probeVideo(std::string url, std::str
 }
 
 bool FFmpegHandler::streamVideo(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent) {
-    bool createPipe = false;
     currentUrl = url;
     this->cookies = cookies;
     this->referer = referer;
@@ -94,31 +59,6 @@ bool FFmpegHandler::streamVideo(std::string url, std::string position, std::stri
 
     DEBUG("StreamVideo: {} -> {}", position, url);
 
-    DEBUG("Create FIFO");
-    fifoFilename = "/tmp/ffmpegts_" + browserIp + "_" + std::to_string(browserPort);
-
-    struct stat sb{};
-    if(stat(fifoFilename.c_str(), &sb) != -1) {
-        if (!S_ISFIFO(sb.st_mode) != 0) {
-            if(remove(fifoFilename.c_str()) != 0) {
-                ERROR("File {} exists and is not a pipe. Delete failed. Aborting...\n", fifoFilename.c_str());
-                return false;
-            } else {
-                createPipe = true;
-            }
-        }
-    } else {
-        createPipe = true;
-    }
-
-    if (createPipe) {
-        if (mkfifo(fifoFilename.c_str(), 0666) < 0) {
-            ERROR("Unable to create pipe {}. Aborting...\n", fifoFilename.c_str());
-            return false;
-        }
-    }
-
-    DEBUG("Start transcoder");
     // create parameter list
     std::vector<std::string> callStr {
         "ffmpeg", "-hide_banner", "-re", "-y", "-referer", referer, "-user_agent", userAgent, "-headers", "Cookie: " + cookies
@@ -195,7 +135,8 @@ bool FFmpegHandler::streamVideo(std::string url, std::string position, std::stri
 
     callStr.emplace_back("-f");
     callStr.emplace_back("mpegts");
-    callStr.emplace_back(fifoFilename);
+    // callStr.emplace_back(fifoFilename);
+    callStr.emplace_back("pipe:1");
 
     std::ostringstream paramOut;
     if (!callStr.empty()) {
@@ -206,8 +147,28 @@ bool FFmpegHandler::streamVideo(std::string url, std::string position, std::stri
     DEBUG("Call ffmpeg: {}", paramOut.str());
 
     streamHandler = new TinyProcessLib::Process(callStr, "",
-        [](const char *bytes, size_t n) {
-            DEBUG("{}", std::string(bytes, n));
+        [this](const char *bytes, size_t n) {
+            if (stopRequest) {
+                return;
+            }
+
+            if (hasStreamError()) {
+                browserClient->StreamError("Encrypted Stream");
+            } else {
+                if (!browserClient->Heartbeat()) {
+                    // connection problems? abort transcoding
+                    ERROR("Unable to connect to browser. Abort transcoding...");
+                    // stopVideo();
+                    stopRequest = true;
+                }
+
+                if (!vdrClient->ProcessTSPacket(std::string(bytes, n))) {
+                    // connection problems? abort transcoding
+                    ERROR("Unable to connect to vdr. Abort transcoding...");
+                    stopRequest = true;
+                    // stopVideo();
+                }
+            }
         },
 
         [this](const char *bytes, size_t n) {
@@ -223,17 +184,6 @@ bool FFmpegHandler::streamVideo(std::string url, std::string position, std::stri
         },
         true
     );
-
-    if ((fifo = open(fifoFilename.c_str(), O_RDONLY | O_NONBLOCK)) < 0) {
-        ERROR("FFmpegHandler::streamVideo: {}", strerror(errno));
-        return false;
-    }
-
-    // start reader thread
-    DEBUG("Start reader thread");
-    readerRunning = true;
-    readerThread = new std::thread(startReaderThread, fifo, this, browserClient, vdrClient);
-    readerThread->detach();
 
     return true;
 }
@@ -253,30 +203,11 @@ bool FFmpegHandler::resumeVideo(std::string position) {
 }
 
 void FFmpegHandler::stopVideo() {
-    readerRunning = false;
-
-    if (fifo > 0) {
-        close(fifo);
-        fifo = -1;
-    }
-
-    if (readerThread != nullptr) {
-        if (readerThread->joinable()) {
-            readerThread->join();
-        }
-        delete readerThread;
-        readerThread = nullptr;
-    }
-
     if (streamHandler != nullptr) {
         streamHandler->kill();
         streamHandler->get_exit_status();
         delete streamHandler;
         streamHandler = nullptr;
-    }
-
-    if (!fifoFilename.empty()) {
-        remove(fifoFilename.c_str());
     }
 }
 

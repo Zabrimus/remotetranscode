@@ -330,6 +330,25 @@ int main(int argc, char* argv[]) {
 
     // start server
     std::thread t1(startHttpServer, transcoderIp, transcoderPort, movie_path, transparentMovie);
+
+    // stop handler if requested
+    while (true) {
+        for (auto it = handler.cbegin(); it != handler.cend(); ) {
+            if (it->second) {
+                if (it->second->stopHandler()) {
+                    FFmpegHandler* h = it->second;
+                    handler.erase(it++);
+                    h->stopVideo();
+                    delete h;
+                } else {
+                    ++it;
+                }
+            }
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    }
+
     t1.join();
 
     return 0;
