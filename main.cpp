@@ -212,7 +212,7 @@ void startHttpServer(std::string tIp, int tPort, std::string movie_path, std::st
 
         auto name = req.matches[1];
 
-        res.status = 200;
+        res.status = 206;
         res.set_content(transparentVideos[name.str()], "video/webm");
     });
 
