@@ -16,6 +16,7 @@ std::vector<std::string> strsplit(std::string input, std::string delimiter) {
 }
 
 TranscodeConfig::TranscodeConfig() {
+    ffmpegThread = 0;
 }
 
 bool TranscodeConfig::createConfiguration(mINI::INIStructure ini) {
@@ -56,6 +57,11 @@ bool TranscodeConfig::createConfiguration(mINI::INIStructure ini) {
     if (audioTranscodeParameter.empty() || allowedAudioCodecs.empty())  {
         audioTranscodeParameter.clear();
         allowedAudioCodecs.clear();
+    }
+
+    std::string ffmpegThreadStr = ini["ffmpeg"]["threads"];
+    if (!ffmpegThreadStr.empty()) {
+        ffmpegThread = std::atoi(ffmpegThreadStr.c_str());
     }
 
     return true;

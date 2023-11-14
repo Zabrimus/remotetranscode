@@ -66,6 +66,11 @@ bool FFmpegHandler::streamVideo(std::string url, std::string position, std::stri
         "ffmpeg", "-hide_banner", "-re", "-y", "-referer", referer, "-user_agent", userAgent, "-headers", "Cookie: " + cookies
     };
 
+    if (transcodeConfig.threads() > 0) {
+        callStr.emplace_back("-threads");
+        callStr.emplace_back(std::to_string(transcodeConfig.threads()));
+    }
+
     // in case of mpeg-dash ignore the seek command
     if (!endsWith(url, ".mpd")) {
         callStr.emplace_back("-ss");

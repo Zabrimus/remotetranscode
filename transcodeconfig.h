@@ -10,6 +10,8 @@ private:
     std::vector<std::string> videoTranscodeParameter;
     std::vector<std::string> audioTranscodeParameter;
 
+    int ffmpegThread;
+
 public:
     explicit TranscodeConfig();
     ~TranscodeConfig() = default;
@@ -18,6 +20,8 @@ public:
 
     bool isCopyAudio(std::string codec, std::string sample_rate);
     bool isCopyVideo(std::string codec);
+
+    int threads() { return ffmpegThread; };
 
     std::vector<std::string> getAudioTranscodeParameter();
     std::vector<std::string> getVideoTranscodeParameter();
