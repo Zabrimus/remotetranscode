@@ -121,6 +121,7 @@ void startHttpServer(std::string tIp, int tPort, std::string movie_path, std::st
                 ERROR("Probe has not been called before StreamUrl. Aborting...");
                 res.status = 500;
                 res.set_content("Probe has not been called before StreamUrl. Aborting...", "text/plain");
+                return;
             }
 
             DEBUG("Start video streaming...");
