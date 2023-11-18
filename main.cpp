@@ -14,6 +14,8 @@ int transcoderPort;
 std::string browserIp;
 int browserPort;
 
+int seekPause;
+
 httplib::Server transcodeServer;
 
 std::map<std::string, FFmpegHandler*> handler;
@@ -24,6 +26,44 @@ std::mutex httpMutex;
 BrowserClient* browserClient;
 
 TranscodeConfig transcodeConfig;
+
+struct SeekToRequests {
+    std::string streamId;
+    std::string seekTo;
+    std::chrono::_V2::system_clock::time_point lastSeek;
+};
+
+std::vector<SeekToRequests> seekToVec;
+bool stopSeekToThread = false;
+
+void performSeekTo() {
+    while (!stopSeekToThread) {
+        if (seekToVec.empty()) {
+            // nothing to do, wait
+            std::this_thread::sleep_for(std::chrono::milliseconds(25));
+            continue;
+        }
+
+        printf("SeelPause: %d\n", seekPause);
+
+        // iterate over all
+        std::vector<SeekToRequests>::iterator it = seekToVec.begin();
+        for (; it != seekToVec.end();) {
+            auto diff = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::high_resolution_clock::now() - it->lastSeek).count();
+
+            if (diff >= seekPause) {
+                // Seek and delete
+                handler[it->streamId]->seekTo(it->seekTo);
+                it = seekToVec.erase(it);
+            } else {
+                ++it;
+            }
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    }
+}
 
 std::string readFile(std::string_view path) {
     constexpr auto read_size = std::size_t{4096};
@@ -158,9 +198,34 @@ void startHttpServer(std::string tIp, int tPort, std::string movie_path, std::st
         if (streamId.empty() || seekTo.empty()) {
             res.status = 404;
         } else {
-            INFO("SeekTo streamId {}, to {}", streamId, seekTo);
+            INFO("SeekTo streamId {}, to {}\n", streamId, seekTo);
 
-            handler[streamId]->seekTo(seekTo);
+            // search existing seekToRequests
+            std::vector<SeekToRequests>::iterator it = seekToVec.begin();
+            for (; it != seekToVec.end();) {
+                if (it->streamId == streamId) {
+                    it->seekTo = seekTo;
+                    it->lastSeek = std::chrono::high_resolution_clock::now();
+
+                    printf("Update: %ld\n", it->lastSeek.time_since_epoch().count());
+                    break;
+                }
+                ++it;
+            }
+
+            if (it == seekToVec.end()) {
+                // create new entry
+                SeekToRequests s;
+                s.lastSeek = std::chrono::high_resolution_clock::now();
+                s.seekTo = seekTo;
+                s.streamId = streamId;
+
+                printf("Add: %ld\n", s.lastSeek.time_since_epoch().count());
+
+                seekToVec.emplace_back(s);
+            }
+
+            // handler[streamId]->seekTo(seekTo);
 
             res.status = 200;
             res.set_content("ok", "text/plain");
@@ -283,11 +348,13 @@ int main(int argc, char* argv[]) {
             { "transcode",   optional_argument, nullptr, 't' },
             { "movie",       optional_argument, nullptr, 'm' },
             { "loglevel",    optional_argument, nullptr, 'l' },
+            { "seekPause",   optional_argument, nullptr, 's' },
             {nullptr }
     };
 
     int c, option_index = 0, loglevel = 1;
-    while ((c = getopt_long(argc, argv, "c:t:m:l:", long_options, &option_index)) != -1) {
+    seekPause = 500;
+    while ((c = getopt_long(argc, argv, "c:t:m:l:s:", long_options, &option_index)) != -1) {
         switch (c) {
             case 'c':
                 if (!readConfiguration(optarg)) {
@@ -307,6 +374,10 @@ int main(int argc, char* argv[]) {
 
             case 'l':
                 loglevel = atoi(optarg);
+                break;
+
+            case 's':
+                seekPause = atoi(optarg);
                 break;
         }
     }
@@ -333,6 +404,9 @@ int main(int argc, char* argv[]) {
     // start server
     std::thread t1(startHttpServer, transcoderIp, transcoderPort, movie_path, transparentMovie);
 
+    // start seekTo handler
+    std::thread seekToThread = std::thread(performSeekTo);
+
     // stop handler if requested
     while (true) {
         for (auto it = handler.cbegin(); it != handler.cend(); ) {
@@ -351,7 +425,10 @@ int main(int argc, char* argv[]) {
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
     }
 
+    stopSeekToThread = true;
+
     t1.join();
+    seekToThread.join();
 
     return 0;
 }
