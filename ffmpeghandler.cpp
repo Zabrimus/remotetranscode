@@ -220,6 +220,7 @@ void FFmpegHandler::stopVideo() {
 
 bool FFmpegHandler::seekTo(std::string pos) {
     pauseVideo();
+    vdrClient->Seeked();
     resumeVideo(pos);
 
     return true;

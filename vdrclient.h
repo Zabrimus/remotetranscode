@@ -9,6 +9,7 @@ public:
     ~VdrClient();
 
     bool ProcessTSPacket(std::string packet);
+    bool Seeked();
 
 private:
     httplib::Client* client;

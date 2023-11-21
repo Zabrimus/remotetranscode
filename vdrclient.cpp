@@ -25,3 +25,18 @@ bool VdrClient::ProcessTSPacket(std::string packet) {
 
     return true;
 }
+
+bool VdrClient::Seeked() {
+    if (auto res = client->Get("/Seeked")) {
+        if (res->status != 200) {
+            INFO("[remotetranscoder] Http result(Seeked): {}", res->status);
+            return false;
+        }
+    } else {
+        auto err = res.error();
+        ERROR("[remotetranscoder] Http error(Seeked): {}", httplib::to_string(err));
+        return false;
+    }
+
+    return true;
+}

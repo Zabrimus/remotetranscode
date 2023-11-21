@@ -44,8 +44,6 @@ void performSeekTo() {
             continue;
         }
 
-        printf("SeelPause: %d\n", seekPause);
-
         // iterate over all
         std::vector<SeekToRequests>::iterator it = seekToVec.begin();
         for (; it != seekToVec.end();) {
