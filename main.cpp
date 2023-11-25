@@ -180,7 +180,9 @@ void startHttpServer(std::string tIp, int tPort, std::string movie_path, std::st
         } else {
             INFO("Pause streamId {}", streamId);
 
-            handler[streamId]->pauseVideo();
+            if (handler[streamId] != nullptr) {
+                handler[streamId]->pauseVideo();
+            }
 
             res.status = 200;
             res.set_content("ok", "text/plain");
@@ -241,7 +243,9 @@ void startHttpServer(std::string tIp, int tPort, std::string movie_path, std::st
         if (streamId.empty()) {
             res.status = 404;
         } else {
-            handler[streamId]->resumeVideo(position);
+            if (handler[streamId] != nullptr) {
+                handler[streamId]->resumeVideo(position);
+            }
 
             res.status = 200;
             res.set_content("ok", "text/plain");
