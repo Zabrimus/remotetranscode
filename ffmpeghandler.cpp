@@ -171,9 +171,9 @@ bool FFmpegHandler::streamVideo(std::string url, std::string position, std::stri
 
                 if (!vdrClient->ProcessTSPacket(std::string(bytes, n))) {
                     // connection problems? abort transcoding
-                    ERROR("Unable to connect to vdr. Abort transcoding...");
+                    // This can be happen by intention, e.g. if VDR stops the video player
+                    DEBUG("Unable to connect to vdr. Abort transcoding...");
                     stopRequest = true;
-                    // stopVideo();
                 }
             }
         },
@@ -211,7 +211,7 @@ bool FFmpegHandler::resumeVideo(std::string position) {
 
 void FFmpegHandler::stopVideo() {
     if (streamHandler != nullptr) {
-        streamHandler->kill();
+        streamHandler->kill(true);
         streamHandler->get_exit_status();
         delete streamHandler;
         streamHandler = nullptr;

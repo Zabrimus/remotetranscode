@@ -18,8 +18,9 @@ bool VdrClient::ProcessTSPacket(std::string packet) {
             return false;
         }
     } else {
+        // this can be reached by intention. If e.g. VDR stops the video player
         auto err = res.error();
-        ERROR("[remotetranscoder] Http error(ProcessTSPacket): {}", httplib::to_string(err));
+        DEBUG("[remotetranscoder] Http error(ProcessTSPacket): {}", httplib::to_string(err));
         return false;
     }
 
