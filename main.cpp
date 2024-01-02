@@ -81,7 +81,7 @@ inline bool startsWith(const std::string& str, const std::string& prefix) {
     return str.size() >= prefix.size() && 0 == str.compare(0, prefix.size(), prefix);
 }
 
-void startHttpServer(std::string tIp, int tPort, std::string movie_path, std::string transparentMovie) {
+void startHttpServer(std::string tIp, int tPort, std::string movie_path, std::string transparentMovie, bool bindAll) {
 
     httplib::Headers headers;
     headers.emplace("Cache-Control", "no-cache");
@@ -284,8 +284,9 @@ void startHttpServer(std::string tIp, int tPort, std::string movie_path, std::st
         res.set_content(transparentVideos[name.str()], "video/webm");
     });
 
-    if (!transcodeServer.listen(tIp, tPort)) {
-        CRITICAL("Call of listen failed: ip {}, port {}, Reason: {}", tIp, tPort, strerror(errno));
+    std::string listenIp = bindAll ? "0.0.0.0" : tIp;
+    if (!transcodeServer.listen(listenIp, tPort)) {
+        CRITICAL("Call of listen failed: ip {}, port {}, Reason: {}", listenIp, tPort, strerror(errno));
         exit(1);
     }
 }
@@ -351,12 +352,15 @@ int main(int argc, char* argv[]) {
             { "movie",       optional_argument, nullptr, 'm' },
             { "loglevel",    optional_argument, nullptr, 'l' },
             { "seekPause",   optional_argument, nullptr, 's' },
+            { "bindall",     optional_argument, nullptr, 'b' },
             {nullptr }
     };
 
     int c, option_index = 0, loglevel = 1;
+    bool bindAll = false;
+
     seekPause = 500;
-    while ((c = getopt_long(argc, argv, "c:t:m:l:s:", long_options, &option_index)) != -1) {
+    while ((c = getopt_long(argc, argv, "c:t:m:l:s:b", long_options, &option_index)) != -1) {
         switch (c) {
             case 'c':
                 if (!readConfiguration(optarg)) {
@@ -381,6 +385,10 @@ int main(int argc, char* argv[]) {
             case 's':
                 seekPause = atoi(optarg);
                 break;
+
+            case 'b':
+                bindAll = true;
+                break;
         }
     }
 
@@ -404,7 +412,7 @@ int main(int argc, char* argv[]) {
     std::string transparentMovie = readFile(movie_path + "/transparent-full.webm");
 
     // start server
-    std::thread t1(startHttpServer, transcoderIp, transcoderPort, movie_path, transparentMovie);
+    std::thread t1(startHttpServer, transcoderIp, transcoderPort, movie_path, transparentMovie, bindAll);
 
     // start seekTo handler
     std::thread seekToThread = std::thread(performSeekTo);
