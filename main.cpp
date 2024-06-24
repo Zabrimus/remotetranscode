@@ -401,15 +401,22 @@ int main(int argc, char* argv[]) {
         default: logger.set_level(spdlog::level::err); break;
     }
 
+    // read whole transparent file into memory
+    std::string transparentMovie = readFile(movie_path + "/transparent-full.webm");
+
+    // check if the mandatory transparent video exists
+    if (transparentMovie.length() == 0) {
+        ERROR("Video not found: {}/{}", movie_path, "transparent-full.webm");
+        ERROR("Please check the configuration/installation. Abort...");
+        exit(1);
+    }
+
     // remove all existing temp. transparent video files
     for (const auto & entry : std::filesystem::directory_iterator(movie_path)) {
         if (startsWith(entry.path(), movie_path + "/transparent-video-")) {
             remove(entry.path());
         }
     }
-
-    // read whole transparent file into memory
-    std::string transparentMovie = readFile(movie_path + "/transparent-full.webm");
 
     // start server
     std::thread t1(startHttpServer, transcoderIp, transcoderPort, movie_path, transparentMovie, bindAll);
