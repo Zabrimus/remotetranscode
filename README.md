@@ -6,8 +6,9 @@ An application which works together with [cefbrowser](https://github.com/Zabrimu
 meson setup build
 cd build
 meson compile
+meson install
 ```
-The binary exists in the build folder with name ```remotetrans```.
+The release exists in the subdirectory ```Release``` of the build folder.
 
 ## Configuration
 A default configuration can be found in folder config: ```sockets.ini```.
