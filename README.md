@@ -19,7 +19,7 @@ It's safe to use the same sockets.ini for all of the three parts (vdr-plugin-web
 ```
 -c / --config </path/to/sockets.ini>   (mandatory parameter)
 -t / --transcode </path/to/codecs.ini> (optional parameter)
--m / --movie <directory of the movie files, default ./movie> (optional parameter)
+-m / --movie <directory of the movie files, default ./movie (optional parameter)
 -l / --loglevel <level> (from 0 to 4, where 4 means very, very verbose logging)
 -s / --seekPause <ms> (wait ms milliseconds before really doing a video jump. In the meantime all jumps are collected)
 ```
