@@ -29,10 +29,11 @@ mini_dep = mini_proj.get_variable('mini_dep')
 
 
 exe = executable('remotrans', 'main.cpp', 'logger.cpp', 'ffmpeghandler.cpp', 'browserclient.cpp', 'transcodeconfig.cpp', 'vdrclient.cpp',
-                 install : false,
+                 install : true,
+                 install_dir : meson.current_build_dir() + '/Release',
                  dependencies: [mini_dep, spdlog_dep, tiny_process_library_dep])
 
 #
-# install static content
+# install
 #
-install_subdir('static-content/movie', install_dir : meson.current_build_dir())
+install_subdir('static-content/movie', install_dir : meson.current_build_dir() + '/Release')
