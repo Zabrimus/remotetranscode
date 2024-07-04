@@ -1,5 +1,7 @@
 #include <string>
 #include <chrono>
+#include <iostream>
+#include <fstream>
 #include "ffmpeghandler.h"
 #include "logger.h"
 
@@ -63,8 +65,23 @@ bool FFmpegHandler::streamVideo(std::string url, std::string position, std::stri
 
     // create parameter list
     std::vector<std::string> callStr {
-        "ffmpeg", "-hide_banner", "-re", "-y", "-referer", referer, "-user_agent", userAgent, "-headers", "Cookie: " + cookies
+        "ffmpeg", "-hide_banner", "-re", "-y"
     };
+
+    if (!referer.empty()) {
+        callStr.push_back("-referer");
+        callStr.push_back(referer);
+    }
+
+    if (!userAgent.empty()) {
+        callStr.push_back("-user_agent");
+        callStr.push_back(userAgent);
+    }
+
+    if (!cookies.empty()) {
+        callStr.push_back("-headers");
+        callStr.push_back("Cookie: " + cookies);
+    }
 
     if (transcodeConfig.threads() > 0) {
         callStr.emplace_back("-threads");
@@ -80,69 +97,40 @@ bool FFmpegHandler::streamVideo(std::string url, std::string position, std::stri
     callStr.emplace_back("-i");
     callStr.emplace_back(url);
 
-    // iterate overall streams
-    int audioStreamId = 0;
-    int videoStreamId = 0;
+    // add video stream
+    for (auto& v : bstreams) {
+        if (v["codec_type"] == "video") {
+            callStr.emplace_back("-map");
+            callStr.emplace_back("0:" + std::to_string((int)v["index"]));
+            callStr.emplace_back("-c:" + std::to_string((int)v["index"]));
 
-    // find best video stream
-    int maxVideoBitrate = 0;
-    int maxVideoBitrateIndex = -1;
-    for (const auto& s : streams) {
-        if (s.type == "video") {
-            if (std::atoi(s.bit_rate.c_str()) > maxVideoBitrate) {
-                maxVideoBitrate = std::atoi(s.bit_rate.c_str());
-                maxVideoBitrateIndex = videoStreamId;
+            if (transcodeConfig.isCopyVideo(v["codec_name"])) {
+                callStr.emplace_back("copy");
+            } else {
+                auto videoParameter = transcodeConfig.getVideoTranscodeParameter();
+                callStr.insert(callStr.end(), videoParameter.begin(), videoParameter.end());
             }
-            videoStreamId++;
-        }
-    }
-
-    videoStreamId = 0;
-
-    DEBUG("Video stream with max bitrate {}, index {}", maxVideoBitrate, maxVideoBitrateIndex);
-
-    // add best video stream
-    if (maxVideoBitrateIndex >= 0) {
-        auto bestVideoStream = streams.at(maxVideoBitrateIndex);
-
-        callStr.emplace_back("-map");
-        callStr.emplace_back("0:v:" + std::to_string(maxVideoBitrateIndex));
-        callStr.emplace_back("-c:v:" + std::to_string(maxVideoBitrateIndex));
-
-        if (transcodeConfig.isCopyVideo(bestVideoStream.codec)) {
-            callStr.emplace_back("copy");
-
-            if (bestVideoStream.codec == "h264" && bestVideoStream.codec_tag == "avc1") {
-                callStr.emplace_back("-bsf:v");
-                callStr.emplace_back("h264_mp4toannexb");
-            }
-        } else {
-            auto videoParameter = transcodeConfig.getVideoTranscodeParameter();
-            callStr.insert(callStr.end(), videoParameter.begin(), videoParameter.end());
         }
     }
 
     // add audio streams
-    for (const auto& s : streams) {
-        if (s.type == "audio") {
+    for (auto& v : bstreams) {
+        if (v["codec_type"] == "audio") {
             callStr.emplace_back("-map");
-            callStr.emplace_back("0:a:" + std::to_string(audioStreamId));
-            callStr.emplace_back("-c:a:" + std::to_string(audioStreamId));
+            callStr.emplace_back("0:" + std::to_string((int)v["index"]));
+            callStr.emplace_back("-c:" + std::to_string((int)v["index"]));
 
-            if (transcodeConfig.isCopyAudio(s.codec, s.sample_rate)) {
+            if (transcodeConfig.isCopyAudio(v["codec_name"], v["sample_rate"])) {
                 callStr.emplace_back("copy");
             } else {
                 auto audioParameter = transcodeConfig.getAudioTranscodeParameter();
                 callStr.insert(callStr.end(), audioParameter.begin(), audioParameter.end());
             }
-
-            audioStreamId++;
         }
     }
 
     callStr.emplace_back("-f");
     callStr.emplace_back("mpegts");
-    // callStr.emplace_back(fifoFilename);
     callStr.emplace_back("pipe:1");
 
     std::ostringstream paramOut;
@@ -230,20 +218,38 @@ std::shared_ptr<std::string> FFmpegHandler::probe(const std::string& url) {
     auto output = std::make_shared<std::string>();
     auto videoResult = std::make_shared<std::string>();
 
-    streams.clear();
+    bstreams.clear();
 
     // get stream infos
     DEBUG("Starte ffprobe");
-    std::vector<std::string> callStr {
-        "ffprobe", "-hide_banner", "-i", url,
-        "-loglevel", "quiet",
-        "-referer", referer,
-        "-user_agent", userAgent,
-        "-headers", "Cookie: " + cookies,
-        "-print_format", "csv",
-        "-show_entries", "format=duration",
-        "-show_entries", "stream=codec_type,codec_name,bit_rate,sample_rate,codec_tag_string,width,height,bit_rate"
+    std::vector<std::string> callStr{
+            "ffprobe", "-hide_banner", "-i", url,
+            "-loglevel", "quiet"
     };
+
+    if (!referer.empty()) {
+        callStr.push_back("-referer");
+        callStr.push_back(referer);
+    }
+
+    if (!userAgent.empty()) {
+        callStr.push_back("-user_agent");
+        callStr.push_back(userAgent);
+    }
+
+    if (!cookies.empty()) {
+        callStr.push_back("-headers");
+        callStr.push_back("Cookie: " + cookies);
+    }
+
+    callStr.push_back("-print_format");
+    callStr.push_back("json");
+
+    callStr.push_back("-show_entries");
+    callStr.push_back("format=duration");
+
+    callStr.push_back("-show_entries");
+    callStr.push_back("stream=index,codec_type,codec_name,bit_rate,sample_rate,codec_tag_string,width,height,bit_rate");
 
     TinyProcessLib::Process process(callStr, "", [output](const char *bytes, size_t n) {
         *output += std::string(bytes, n);
@@ -262,46 +268,88 @@ std::shared_ptr<std::string> FFmpegHandler::probe(const std::string& url) {
 
     *videoResult = "no video";
 
-    std::istringstream input;
-    input.str(*output);
-    for (std::string line; std::getline(input, line);) {
-        if (line.length() == 0) {
-            // reset streams (ffprobe is a bit strange)
-            streams.clear();
-            continue;
-        }
+    json st = json::parse(*output);
 
-        auto parts = split(line, ",");
+    json bestProgram;
+    int bestWidth = -1;
+    json bestVideo;
 
-        if (!parts.empty()) {
-            if (parts[0] == "stream") {
-                stream_info info;
-                info.codec = parts[1];
-                info.type = parts[2];
-                info.codec_tag = parts[3];
+    // search the best video in programs
+    for (auto& el1 : st.items()) {
+        for (auto& el2 : el1.value()) {
+            for (auto& el3 : el2) {
+                if (el3.contains("width")) {
+                    int w = el3["width"];
+                    if (w > bestWidth) {
+                        bestProgram = el2;
+                        bestWidth = w;
 
-                if (info.type == "audio") {
-                    info.sample_rate = parts[4];
-                    info.bit_rate = parts[5];
-                } else if (info.type == "video") {
-                    info.sample_rate = "0";
-                    info.bit_rate = parts[6];
+                        std::string sample_rate;
+                        if (el3.contains("sample_rate")) {
+                            sample_rate = el3["sample_rate"];
+                        } else {
+                            sample_rate = "0";
+                        }
 
-                    *videoResult = info.codec + "/" + info.codec_tag + "/" + parts[4] + "/" + parts[5];
-                } else {
-                    // ignore this
+                        std::string bit_rate;
+                        if (el3.contains("bit_rate")) {
+                            sample_rate = el3["bit_rate"];
+                        } else {
+                            sample_rate = "0";
+                        }
+
+                        std::string cn = el3["codec_name"];
+                        std::string cnt = el3["codec_tag_string"];
+                        *videoResult = cn + "/" + cnt + "/" + sample_rate + "/" + bit_rate;
+                    }
                 }
-
-                DEBUG("Found stream: {}, {}, {}, {}, {}", info.type, info.codec, info.codec_tag, info.sample_rate, info.bit_rate);
-
-                streams.push_back(info);
-            } else if (parts[0] == "format") {
-                duration = parts[1];
-
-                DEBUG("Found duration: {}", duration);
             }
         }
     }
+
+    // programs not found. search all streams.
+    if (bestProgram == nullptr) {
+        for (auto& el : st["streams"]) {
+            if (el.contains("width")) {
+                int w = el["width"];
+                if (w > bestWidth) {
+                    bestVideo = el;
+                    bestWidth = w;
+
+                    std::string sample_rate;
+                    if (el.contains("sample_rate")) {
+                        sample_rate = el["sample_rate"];
+                    } else {
+                        sample_rate = "0";
+                    }
+
+                    std::string bit_rate;
+                    if (el.contains("bit_rate")) {
+                        sample_rate = el["bit_rate"];
+                    } else {
+                        sample_rate = "0";
+                    }
+
+                    std::string cn = el["codec_name"];
+                    std::string cnt = el["codec_tag_string"];
+                    *videoResult = cn + "/" + cnt + "/" + sample_rate + "/" + bit_rate;
+                }
+            } else if (el.contains("codec_type") && el["codec_type"] == "audio") {
+                bestProgram.push_back(el);
+            }
+        }
+    }
+
+    bestProgram.push_back(bestVideo);
+
+    auto f = st["format"];
+    if (f.contains("duration")) {
+        duration = f["duration"];
+    } else {
+        duration = "";
+    }
+
+    bstreams = bestProgram;
 
     return videoResult;
 }
@@ -311,7 +359,7 @@ bool FFmpegHandler::createVideoWithLength(std::string seconds, const std::string
     std::string video;
 
     if (seconds == "N/A") {
-        seconds = "08:00:00.000000000";
+        seconds = "07:59:00.000000000";
     }
 
     std::vector<std::string> callStr {
@@ -352,14 +400,17 @@ std::shared_ptr<std::string> FFmpegHandler::createVideo(const std::string& url, 
         return nullptr;
     }
 
-    std::shared_ptr<std::string> videoInfo = probe(url);
+    std::shared_ptr<std::string> videoInfo  = probe(url);
 
     if (!duration.empty()) {
         if (createVideoWithLength(duration, outname)) {
             return videoInfo;
         }
     } else {
-        ERROR("Duration is empty");
+        // possibly a live stream. Set duration to maximum.
+        if (createVideoWithLength("N/A", outname)) {
+            return videoInfo;
+        }
     }
 
     return nullptr;

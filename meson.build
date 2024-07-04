@@ -26,8 +26,6 @@ tiny_process_library_dep = tiny_process_library_proj.get_variable('tiny_process_
 mini_proj = subproject('mini')
 mini_dep = mini_proj.get_variable('mini_dep')
 
-
-
 exe = executable('remotrans', 'main.cpp', 'logger.cpp', 'ffmpeghandler.cpp', 'browserclient.cpp', 'transcodeconfig.cpp', 'vdrclient.cpp',
                  install : true,
                  install_dir : meson.current_build_dir() + '/Release',

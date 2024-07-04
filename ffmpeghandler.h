@@ -6,16 +6,11 @@
 #include "browserclient.h"
 #include "vdrclient.h"
 #include "transcodeconfig.h"
+#include "json.hpp"
+
+using json = nlohmann::json;
 
 extern std::map<std::string, std::string> transparentVideos;
-
-typedef struct stream_info {
-    std::string type;
-    std::string codec;
-    std::string codec_tag;
-    std::string sample_rate;
-    std::string bit_rate;
-} stream_info;
 
 class FFmpegHandler {
 private:
@@ -54,7 +49,7 @@ private:
     std::string postfix;
     std::string transparentVideoFile;
 
-    std::vector<stream_info> streams;
+    json bstreams;
     std::string duration;
     std::string currentUrl;
 
