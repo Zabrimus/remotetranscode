@@ -245,17 +245,25 @@ std::shared_ptr<std::string> FFmpegHandler::probe(const std::string& url) {
     callStr.push_back("-print_format");
     callStr.push_back("json");
 
+    callStr.push_back("-show_format");
+
+    callStr.push_back("-show_streams");
+
     callStr.push_back("-show_entries");
     callStr.push_back("format=duration");
 
+    /*
     callStr.push_back("-show_entries");
     callStr.push_back("stream=index,codec_type,codec_name,bit_rate,sample_rate,codec_tag_string,width,height,bit_rate");
+    */
 
     TinyProcessLib::Process process(callStr, "", [output](const char *bytes, size_t n) {
         *output += std::string(bytes, n);
     });
 
     int exit = process.get_exit_status();
+
+    DEBUG("Probe exit code: {}", exit);
 
     std::ostringstream paramOut;
     if (!callStr.empty()) {
@@ -274,8 +282,10 @@ std::shared_ptr<std::string> FFmpegHandler::probe(const std::string& url) {
     int bestWidth = -1;
     json bestVideo;
 
+    auto prgs = st["programs"];
+
     // search the best video in programs
-    for (auto& el1 : st.items()) {
+    for (auto& el1 : prgs.items()) {
         for (auto& el2 : el1.value()) {
             for (auto& el3 : el2) {
                 if (el3.contains("width")) {
@@ -307,8 +317,10 @@ std::shared_ptr<std::string> FFmpegHandler::probe(const std::string& url) {
         }
     }
 
+    DEBUG("Best Programms, size {}", bestProgram.size());
+
     // programs not found. search all streams.
-    if (bestProgram == nullptr) {
+    if (bestProgram == nullptr || bestProgram.empty()) {
         for (auto& el : st["streams"]) {
             if (el.contains("width")) {
                 int w = el["width"];
@@ -338,15 +350,17 @@ std::shared_ptr<std::string> FFmpegHandler::probe(const std::string& url) {
                 bestProgram.push_back(el);
             }
         }
+
+        bestProgram.push_back(bestVideo);
     }
 
-    bestProgram.push_back(bestVideo);
+    DEBUG("videoResult: {}", *videoResult);
 
     auto f = st["format"];
     if (f.contains("duration")) {
         duration = f["duration"];
     } else {
-        duration = "";
+        duration = "N/A";
     }
 
     bstreams = bestProgram;
@@ -358,8 +372,13 @@ bool FFmpegHandler::createVideoWithLength(std::string seconds, const std::string
     auto output = std::make_shared<std::string>();
     std::string video;
 
+    DEBUG("CreateVideoWithLength: seconds:{} seconds, name:{}", seconds, name);
+
     if (seconds == "N/A") {
-        seconds = "07:59:00.000000000";
+        // not necessary to remux, split or anything else
+        transparentVideos.erase(name);
+        transparentVideos[name] = transparent_movie;
+        return true;
     }
 
     std::vector<std::string> callStr {
@@ -400,18 +419,40 @@ std::shared_ptr<std::string> FFmpegHandler::createVideo(const std::string& url, 
         return nullptr;
     }
 
-    std::shared_ptr<std::string> videoInfo  = probe(url);
+    std::shared_ptr<std::string> videoInfo = probe(url);
 
-    if (!duration.empty()) {
-        if (createVideoWithLength(duration, outname)) {
-            return videoInfo;
-        }
-    } else {
-        // possibly a live stream. Set duration to maximum.
-        if (createVideoWithLength("N/A", outname)) {
-            return videoInfo;
-        }
+    if (createVideoWithLength(duration, outname)) {
+        return videoInfo;
     }
 
     return nullptr;
+}
+
+std::string FFmpegHandler::getAudioInfo() {
+    json result;
+
+    // add audio streams
+    int audioIndex = 0;
+    for (auto& v : bstreams) {
+        if (v["codec_type"] == "audio") {
+            std::string language;
+            std::string comment;
+
+            if (v.contains("tags")) {
+                language = v["tags"]["language"];
+                comment = v["tags"]["comment"];
+
+                json lang;
+                lang["index"] = audioIndex;
+                lang["language"] = language;
+                lang["comment"] = comment;
+
+                result["stream"].push_back(lang);
+            }
+        }
+
+        audioIndex++;
+    }
+
+    return result.dump();
 }

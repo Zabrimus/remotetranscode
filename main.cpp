@@ -275,6 +275,25 @@ void startHttpServer(std::string tIp, int tPort, std::string movie_path, std::st
         }
     });
 
+    transcodeServer.Post("/AudioInfo", [](const httplib::Request &req, httplib::Response &res) {
+        std::lock_guard<std::mutex> guard(httpMutex);
+
+        auto streamId = req.get_param_value("streamId");
+
+        DEBUG("AudioInfo: StreamId: {}", streamId);
+
+        if (streamId.empty()) {
+            res.status = 404;
+        } else {
+            if (handler[streamId] != nullptr) {
+                res.status = 200;
+                res.set_content(handler[streamId]->getAudioInfo(), "application/json");
+            } else {
+                res.status = 404;
+            }
+        }
+    });
+
     transcodeServer.Get(R"(/movie/(.*))", [](const httplib::Request &req, httplib::Response &res) {
         std::lock_guard<std::mutex> guard(httpMutex);
 

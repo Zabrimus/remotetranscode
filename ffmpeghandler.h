@@ -34,6 +34,8 @@ public:
     bool hasStreamError() { return streamError; };
     bool stopHandler() { return stopRequest; };
 
+    std::string getAudioInfo();
+
     std::string getVideoName() { return transparentVideoFile; };
 
 private:
