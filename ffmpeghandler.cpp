@@ -97,6 +97,13 @@ bool FFmpegHandler::streamVideo(std::string url, std::string position, std::stri
     callStr.emplace_back("-i");
     callStr.emplace_back(url);
 
+    callStr.emplace_back("-c:v");
+    callStr.emplace_back("copy");
+    callStr.emplace_back("-c:a");
+    callStr.emplace_back("copy");
+    callStr.emplace_back("-ar");
+    callStr.emplace_back("48000");
+
     // add video stream
     for (auto& v : bstreams) {
         if (v["codec_type"] == "video") {
@@ -122,6 +129,8 @@ bool FFmpegHandler::streamVideo(std::string url, std::string position, std::stri
 
             if (transcodeConfig.isCopyAudio(v["codec_name"], v["sample_rate"])) {
                 callStr.emplace_back("copy");
+                callStr.emplace_back("-ar");
+                callStr.emplace_back("48000");
             } else {
                 auto audioParameter = transcodeConfig.getAudioTranscodeParameter();
                 callStr.insert(callStr.end(), audioParameter.begin(), audioParameter.end());
@@ -252,11 +261,6 @@ std::shared_ptr<std::string> FFmpegHandler::probe(const std::string& url) {
     callStr.push_back("-show_entries");
     callStr.push_back("format=duration");
 
-    /*
-    callStr.push_back("-show_entries");
-    callStr.push_back("stream=index,codec_type,codec_name,bit_rate,sample_rate,codec_tag_string,width,height,bit_rate");
-    */
-
     TinyProcessLib::Process process(callStr, "", [output](const char *bytes, size_t n) {
         *output += std::string(bytes, n);
     });
@@ -279,8 +283,12 @@ std::shared_ptr<std::string> FFmpegHandler::probe(const std::string& url) {
     json st = json::parse(*output);
 
     json bestProgram;
+
     int bestWidth = -1;
     json bestVideo;
+
+    unsigned long bestAudioBitrate = 0;
+    json bestAudio;
 
     auto prgs = st["programs"];
 
@@ -319,7 +327,7 @@ std::shared_ptr<std::string> FFmpegHandler::probe(const std::string& url) {
 
     DEBUG("Best Programms, size {}", bestProgram.size());
 
-    // programs not found. search all streams.
+    // programs not found. search all streams and get best video/audio
     if (bestProgram == nullptr || bestProgram.empty()) {
         for (auto& el : st["streams"]) {
             if (el.contains("width")) {
@@ -347,11 +355,44 @@ std::shared_ptr<std::string> FFmpegHandler::probe(const std::string& url) {
                     *videoResult = cn + "/" + cnt + "/" + sample_rate + "/" + bit_rate;
                 }
             } else if (el.contains("codec_type") && el["codec_type"] == "audio") {
-                bestProgram.push_back(el);
+                // check if the stream has a sample rate
+                if (el.contains("sample_rate")) {
+                    std::string sr = el["sample_rate"];
+                    if (sr == "0") {
+                        int idx = el["index"];
+                        ERROR("Ignore Audio stream, sample_rate == 0:  {}", std::to_string(idx));
+                        continue;
+                    }
+
+                    if (el.contains("tags")) {
+                        if (el["tags"].contains("variant_bitrate")) {
+                            std::string br = el["tags"]["variant_bitrate"];
+                            unsigned long currentBitrate = std::atol(br.c_str());
+
+                            DEBUG("CurrentBitrate: {}, BestBitrate {}", currentBitrate, bestAudioBitrate);
+
+                            if (currentBitrate > bestAudioBitrate) {
+                                bestAudioBitrate = currentBitrate;
+                                bestAudio = el;
+
+                                DEBUG("Set Best AUDIO to {}", bestAudio.dump());
+                            }
+                        } else if (el["tags"].contains("language")) {
+                            // always add this audio track
+                            bestProgram.push_back(el);
+                        }
+                    }
+                }
             }
         }
 
-        bestProgram.push_back(bestVideo);
+        if (bestVideo.size() > 0) {
+            bestProgram.push_back(bestVideo);
+        }
+
+        if (bestAudio.size() > 0) {
+            bestProgram.push_back(bestAudio);
+        }
     }
 
     DEBUG("videoResult: {}", *videoResult);
@@ -364,6 +405,8 @@ std::shared_ptr<std::string> FFmpegHandler::probe(const std::string& url) {
     }
 
     bstreams = bestProgram;
+
+    DEBUG("Result of bestStreams: {}", bstreams.dump());
 
     return videoResult;
 }
