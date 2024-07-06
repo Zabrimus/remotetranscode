@@ -52,6 +52,7 @@ private:
     std::string transparentVideoFile;
 
     json bstreams;
+    bool ffmpegCopy;
     std::string duration;
     std::string currentUrl;
 

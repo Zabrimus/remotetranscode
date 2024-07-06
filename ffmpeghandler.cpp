@@ -97,45 +97,53 @@ bool FFmpegHandler::streamVideo(std::string url, std::string position, std::stri
     callStr.emplace_back("-i");
     callStr.emplace_back(url);
 
-    callStr.emplace_back("-c:v");
-    callStr.emplace_back("copy");
-    callStr.emplace_back("-c:a");
-    callStr.emplace_back("copy");
-    callStr.emplace_back("-ar");
-    callStr.emplace_back("48000");
+    if (!ffmpegCopy) {
+        // copy dedicated streams
 
-    // add video stream
-    for (auto& v : bstreams) {
-        if (v["codec_type"] == "video") {
-            callStr.emplace_back("-map");
-            callStr.emplace_back("0:" + std::to_string((int)v["index"]));
-            callStr.emplace_back("-c:" + std::to_string((int)v["index"]));
+        callStr.emplace_back("-c:v");
+        callStr.emplace_back("copy");
+        callStr.emplace_back("-c:a");
+        callStr.emplace_back("copy");
+        callStr.emplace_back("-ar");
+        callStr.emplace_back("48000");
 
-            if (transcodeConfig.isCopyVideo(v["codec_name"])) {
-                callStr.emplace_back("copy");
-            } else {
-                auto videoParameter = transcodeConfig.getVideoTranscodeParameter();
-                callStr.insert(callStr.end(), videoParameter.begin(), videoParameter.end());
+        // add video stream
+        for (auto &v: bstreams) {
+            if (v["codec_type"] == "video") {
+                callStr.emplace_back("-map");
+                callStr.emplace_back("0:" + std::to_string((int) v["index"]));
+                callStr.emplace_back("-c:" + std::to_string((int) v["index"]));
+
+                if (transcodeConfig.isCopyVideo(v["codec_name"])) {
+                    callStr.emplace_back("copy");
+                } else {
+                    auto videoParameter = transcodeConfig.getVideoTranscodeParameter();
+                    callStr.insert(callStr.end(), videoParameter.begin(), videoParameter.end());
+                }
             }
         }
-    }
 
-    // add audio streams
-    for (auto& v : bstreams) {
-        if (v["codec_type"] == "audio") {
-            callStr.emplace_back("-map");
-            callStr.emplace_back("0:" + std::to_string((int)v["index"]));
-            callStr.emplace_back("-c:" + std::to_string((int)v["index"]));
+        // add audio streams
+        for (auto &v: bstreams) {
+            if (v["codec_type"] == "audio") {
+                callStr.emplace_back("-map");
+                callStr.emplace_back("0:" + std::to_string((int) v["index"]));
+                callStr.emplace_back("-c:" + std::to_string((int) v["index"]));
 
-            if (transcodeConfig.isCopyAudio(v["codec_name"], v["sample_rate"])) {
-                callStr.emplace_back("copy");
-                callStr.emplace_back("-ar");
-                callStr.emplace_back("48000");
-            } else {
-                auto audioParameter = transcodeConfig.getAudioTranscodeParameter();
-                callStr.insert(callStr.end(), audioParameter.begin(), audioParameter.end());
+                if (transcodeConfig.isCopyAudio(v["codec_name"], v["sample_rate"])) {
+                    callStr.emplace_back("copy");
+                    callStr.emplace_back("-ar");
+                    callStr.emplace_back("48000");
+                } else {
+                    auto audioParameter = transcodeConfig.getAudioTranscodeParameter();
+                    callStr.insert(callStr.end(), audioParameter.begin(), audioParameter.end());
+                }
             }
         }
+    } else {
+        // let ffmpeg decide which streams to copy
+        callStr.emplace_back("-codec");
+        callStr.emplace_back("copy");
     }
 
     callStr.emplace_back("-f");
@@ -282,6 +290,7 @@ std::shared_ptr<std::string> FFmpegHandler::probe(const std::string& url) {
 
     json st = json::parse(*output);
 
+    ffmpegCopy = false;
     json bestProgram;
 
     int bestWidth = -1;
@@ -360,7 +369,10 @@ std::shared_ptr<std::string> FFmpegHandler::probe(const std::string& url) {
                     std::string sr = el["sample_rate"];
                     if (sr == "0") {
                         int idx = el["index"];
-                        ERROR("Ignore Audio stream, sample_rate == 0:  {}", std::to_string(idx));
+
+                        // it is possible that the valid audio streams are shuffled.
+                        // Let ffmpeg decide which streams to copy.
+                        ffmpegCopy = true;
                         continue;
                     }
 
@@ -379,6 +391,8 @@ std::shared_ptr<std::string> FFmpegHandler::probe(const std::string& url) {
                             }
                         } else if (el["tags"].contains("language")) {
                             // always add this audio track
+                            bestProgram.push_back(el);
+                        } else {
                             bestProgram.push_back(el);
                         }
                     }
