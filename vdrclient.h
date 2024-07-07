@@ -1,6 +1,8 @@
 #pragma once
 
 #include <string>
+
+#define CPPHTTPLIB_OPENSSL_SUPPORT
 #include "httplib.h"
 
 class VdrClient {

@@ -52,20 +52,35 @@ std::shared_ptr<std::string> FFmpegHandler::probeVideo(std::string url, std::str
     DEBUG("Create empty video");
     transparentVideoFile = "transparent-video-" + browserIp + "_" + std::to_string(browserPort) + "-" + this->postfix + ".webm";
 
-    return createVideo(url, transparentVideoFile);
+    struct stat sb{};
+    if ((stat(transparentVideoFile.c_str(), &sb) != -1) && (remove(transparentVideoFile.c_str()) != 0)) {
+        ERROR("File {} exists and delete failed. Aborting...\n", transparentVideoFile.c_str());
+        return nullptr;
+    }
+
+    std::shared_ptr<std::string> videoInfo;
+    if (endsWith(url, ".m3u") || endsWith(url, ".m3u8")) {
+        auto m = M3u8Handler(url);
+        m3u = m.parseM3u();
+        duration = "N/A";
+
+        videoInfo = std::make_shared<std::string>();
+        *videoInfo = std::string("m3u video stream");
+    } else {
+        videoInfo = probe(url);
+    }
+
+    if (createVideoWithLength(duration, transparentVideoFile)) {
+        return videoInfo;
+    }
+
+    return nullptr;
 }
 
-bool FFmpegHandler::streamVideo(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent) {
-    currentUrl = url;
-    this->cookies = cookies;
-    this->referer = referer;
-    this->userAgent = userAgent;
-
-    DEBUG("StreamVideo: {} -> {}", position, url);
-
+std::vector<std::string> FFmpegHandler::prepareStreamCmd(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent) {
     // create parameter list
     std::vector<std::string> callStr {
-        "ffmpeg", "-hide_banner", "-re", "-y"
+            "ffmpeg", "-hide_banner", "-re", "-y"
     };
 
     if (!referer.empty()) {
@@ -157,6 +172,110 @@ bool FFmpegHandler::streamVideo(std::string url, std::string position, std::stri
     }
 
     DEBUG("Call ffmpeg: {}", paramOut.str());
+
+    return callStr;
+}
+
+std::vector<std::string> FFmpegHandler::prepareStreamM3uCmd(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent) {
+    // create parameter list
+    std::vector<std::string> callStr {
+            "ffmpeg", "-hide_banner", "-re", "-y"
+    };
+
+    if (!referer.empty()) {
+        callStr.push_back("-referer");
+        callStr.push_back(referer);
+    }
+
+    if (!userAgent.empty()) {
+        callStr.push_back("-user_agent");
+        callStr.push_back(userAgent);
+    }
+
+    if (!cookies.empty()) {
+        callStr.push_back("-headers");
+        callStr.push_back("Cookie: " + cookies);
+    }
+
+    if (transcodeConfig.threads() > 0) {
+        callStr.emplace_back("-threads");
+        callStr.emplace_back(std::to_string(transcodeConfig.threads()));
+    }
+
+    // in case of mpeg-dash ignore the seek command
+    if (!endsWith(url, ".mpd")) {
+        callStr.emplace_back("-ss");
+        callStr.emplace_back(position);
+    }
+
+    // add main input
+    callStr.emplace_back("-i");
+    callStr.emplace_back(m3u.url);
+
+    // add optional audio input
+    std::vector<std::string> audioMetadata;
+    for (auto a : m3u.audio) {
+        callStr.emplace_back("-i");
+        callStr.emplace_back(a.uri);
+
+        // fill audio info in bstreams
+        json st = json::parse("{ \"codec_type\": \"audio\", \"tags\": { \"language\": \"" + a.language + "\", \"comment\": \"" + a.name + "\" }}");
+
+        bstreams.push_back(st);
+    }
+
+    // transmux
+    callStr.emplace_back("-codec");
+    callStr.emplace_back("copy");
+
+    // main input
+    if (!m3u.audio.empty()) {
+        callStr.emplace_back("-map");
+        callStr.emplace_back("0:v");
+
+        int idx = 1;
+        for (auto a: m3u.audio) {
+            callStr.emplace_back("-map");
+            callStr.emplace_back(std::to_string(idx) + ":a");
+            idx++;
+        }
+
+        callStr.insert(std::end(callStr), std::begin(audioMetadata), std::end(audioMetadata));
+    }
+
+    callStr.emplace_back("-f");
+    callStr.emplace_back("mpegts");
+    callStr.emplace_back("pipe:1");
+
+    std::ostringstream paramOut;
+    if (!callStr.empty()) {
+        std::copy(callStr.begin(), callStr.end() - 1, std::ostream_iterator<std::string>(paramOut, " "));
+        paramOut << callStr.back();
+    }
+
+    DEBUG("Call ffmpeg: {}", paramOut.str());
+
+    return callStr;
+}
+
+bool FFmpegHandler::streamVideo(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent) {
+    currentUrl = url;
+    this->cookies = cookies;
+    this->referer = referer;
+    this->userAgent = userAgent;
+
+    DEBUG("StreamVideo: {} -> {}", position, url);
+
+    // create parameter list
+    std::vector<std::string> callStr;
+
+    if (endsWith(url, ".m3u") || endsWith(url, ".m3u8")) {
+        DEBUG("Pepare stream video (m3u)");
+        callStr = prepareStreamM3uCmd(url, position, cookies, referer, userAgent);
+    } else {
+        DEBUG("Pepare stream video (non-m3u)");
+        callStr = prepareStreamCmd(url, position, cookies, referer, userAgent);
+    }
 
     streamHandler = new TinyProcessLib::Process(callStr, "",
         [this](const char *bytes, size_t n) {
@@ -467,22 +586,6 @@ bool FFmpegHandler::createVideoWithLength(std::string seconds, const std::string
         ERROR("Output:\n{}", *output);
         return false;
     }
-}
-
-std::shared_ptr<std::string> FFmpegHandler::createVideo(const std::string& url, const std::string& outname) {
-    struct stat sb{};
-    if ((stat(outname.c_str(), &sb) != -1) && (remove(outname.c_str()) != 0)) {
-        ERROR("File {} exists and delete failed. Aborting...\n", outname.c_str());
-        return nullptr;
-    }
-
-    std::shared_ptr<std::string> videoInfo = probe(url);
-
-    if (createVideoWithLength(duration, outname)) {
-        return videoInfo;
-    }
-
-    return nullptr;
 }
 
 std::string FFmpegHandler::getAudioInfo() {

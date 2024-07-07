@@ -9,6 +9,11 @@ cmake = import('cmake')
 cpp = meson.get_compiler('cpp')
 
 #
+# openssl
+#
+openssl_dep = dependency('openssl')
+
+#
 # spdlog
 #
 spdlog_proj = subproject('spdlog', default_options: 'tests=false')
@@ -27,9 +32,10 @@ mini_proj = subproject('mini')
 mini_dep = mini_proj.get_variable('mini_dep')
 
 exe = executable('remotrans', 'main.cpp', 'logger.cpp', 'ffmpeghandler.cpp', 'browserclient.cpp', 'transcodeconfig.cpp', 'vdrclient.cpp',
+                 'm3u8handler.cpp',
                  install : true,
                  install_dir : meson.current_build_dir() + '/Release',
-                 dependencies: [mini_dep, spdlog_dep, tiny_process_library_dep])
+                 dependencies: [mini_dep, spdlog_dep, tiny_process_library_dep, openssl_dep])
 
 #
 # install

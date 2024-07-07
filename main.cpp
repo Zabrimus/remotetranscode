@@ -3,10 +3,15 @@
 #include <string>
 #include <filesystem>
 #include "mini/ini.h"
+
+#define CPPHTTPLIB_OPENSSL_SUPPORT
 #include "httplib.h"
+
 #include "logger.h"
 #include "ffmpeghandler.h"
 #include "transcodeconfig.h"
+#include "m3u8handler.h"
+
 
 std::string transcoderIp;
 int transcoderPort;

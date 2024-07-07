@@ -7,6 +7,7 @@
 #include "vdrclient.h"
 #include "transcodeconfig.h"
 #include "json.hpp"
+#include "m3u8handler.h"
 
 using json = nlohmann::json;
 
@@ -51,9 +52,14 @@ private:
     std::string postfix;
     std::string transparentVideoFile;
 
+    // non-m3u streams
     json bstreams;
     bool ffmpegCopy;
     std::string duration;
+
+    // m3u streams
+    m3u_stream m3u;
+
     std::string currentUrl;
 
     BrowserClient* browserClient;
@@ -63,8 +69,11 @@ private:
     std::string movie_path;
     std::string transparent_movie;
 
+
 private:
     std::shared_ptr<std::string> probe(const std::string& url);
     bool createVideoWithLength(std::string seconds, const std::string& name);
-    std::shared_ptr<std::string> createVideo(const std::string& url, const std::string& outname);
+
+    std::vector<std::string> prepareStreamCmd(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent);
+    std::vector<std::string> prepareStreamM3uCmd(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent);
 };
