@@ -62,12 +62,22 @@ std::shared_ptr<std::string> FFmpegHandler::probeVideo(std::string url, std::str
     if (endsWith(url, ".m3u") || endsWith(url, ".m3u8")) {
         auto m = M3u8Handler(url);
         m3u = m.parseM3u();
+
+        if (m3u.height == 0 && m3u.width == 0) {
+            // something went wrong
+            return nullptr;
+        }
+
         duration = "N/A";
 
         videoInfo = std::make_shared<std::string>();
         *videoInfo = std::string("m3u video stream");
     } else {
         videoInfo = probe(url);
+    }
+
+    if (videoInfo == nullptr) {
+        return nullptr;
     }
 
     if (createVideoWithLength(duration, transparentVideoFile)) {
@@ -395,6 +405,10 @@ std::shared_ptr<std::string> FFmpegHandler::probe(const std::string& url) {
     int exit = process.get_exit_status();
 
     DEBUG("Probe exit code: {}", exit);
+    if (exit == 1) {
+        ERROR("Probe of '{}' failed.", url);
+        return nullptr;
+    }
 
     std::ostringstream paramOut;
     if (!callStr.empty()) {

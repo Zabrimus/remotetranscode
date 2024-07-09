@@ -28,12 +28,12 @@ m3u_stream M3u8Handler::parseM3u() {
     httplib::Client cli(uri.scheme + "://" + uri.authority.host + (uri.authority.port > 0 ? std::to_string(uri.authority.port) : ""));
     auto res = cli.Get(uri.path);
 
-    if (res == nullptr) {
-        ERROR("RES is NULL");
-    }
-
     m3u_stream result;
     result.width = result.height = 0;
+
+    if (res == nullptr) {
+        return result;
+    }
 
     if (res->status != 200) {
         return result;
