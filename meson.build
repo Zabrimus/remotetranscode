@@ -16,8 +16,8 @@ openssl_dep = dependency('openssl')
 #
 # spdlog
 #
-spdlog_proj = subproject('spdlog', default_options: 'tests=false')
-spdlog_dep = spdlog_proj.get_variable('spdlog_dep')
+spdlog_proj = subproject('spdlog')
+spdlog_dep = spdlog_proj.get_variable('spdlog_dep', ['tests=disabled', 'std_format=enabled'] )
 
 #
 # tiny-process-library
