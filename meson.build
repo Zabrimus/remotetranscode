@@ -1,7 +1,7 @@
 project('remotetranscode', 'cpp', 'c',
   version : '0.1',
   default_options : ['warning_level=1', 'c_std=c17', 'cpp_std=c++17'],
-  meson_version: '>=0.56.2')
+  meson_version: '>=0.63.0')
 
 add_global_arguments(language : 'cpp')
 
@@ -20,7 +20,7 @@ spdlog_proj = subproject('spdlog')
 spdlog_dep = spdlog_proj.get_variable('spdlog_dep', ['tests=disabled', 'compile_library=true'] )
 
 #
-# tiny-process-library
+# tiny-process-libraryle
 #
 tiny_process_library_proj = subproject('tiny_process_library')
 tiny_process_library_dep = tiny_process_library_proj.get_variable('tiny_process_library_dep')
