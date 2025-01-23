@@ -1,7 +1,7 @@
-diff -ru8 spdlog-1.15.0.orig/meson.build spdlog-1.15.0/meson.build
---- spdlog-1.15.0.orig/meson.build	2025-01-16 16:21:17.485322144 +0100
-+++ spdlog-1.15.0/meson.build	2025-01-16 16:22:05.510625079 +0100
-@@ -11,33 +11,25 @@
+diff -ru8bBwd spdlog-1.15.0.orig/meson.build spdlog-1.15.0/meson.build
+--- spdlog-1.15.0.orig/meson.build	2025-01-23 08:31:58.995381813 +0100
++++ spdlog-1.15.0/meson.build	2025-01-23 08:33:33.285655794 +0100
+@@ -11,55 +11,33 @@
  thread_dep = dependency('threads')
  
  spdlog_dependencies = [thread_dep]
@@ -24,12 +24,10 @@ diff -ru8 spdlog-1.15.0.orig/meson.build spdlog-1.15.0/meson.build
      spdlog_compile_args += '-DSPDLOG_SHARED_LIB'
      spdlog_compile_args += '-Dspdlog_EXPORTS'
 -    if not fmt_dep.found()
--      spdlog_compile_args += '-DFMT_EXPORT'
--      spdlog_compile_args += '-DFMT_SHARED'
--    endif
-+    spdlog_compile_args += '-DFMT_EXPORT'
-+    spdlog_compile_args += '-DFMT_SHARED'
-   endif
+       spdlog_compile_args += '-DFMT_EXPORT'
+       spdlog_compile_args += '-DFMT_SHARED'
+     endif
+-  endif
    subdir('src')
  
    spdlog_dep = declare_dependency(
@@ -37,24 +35,31 @@ diff -ru8 spdlog-1.15.0.orig/meson.build spdlog-1.15.0/meson.build
      dependencies: spdlog_dependencies,
      link_with: spdlog_lib,
      compile_args: spdlog_compile_args,
-@@ -53,13 +45,13 @@
- # install header and pkg-config file
- install_subdir('include/spdlog', install_dir: get_option('includedir'))
- pkg = import('pkgconfig')
- pkg.generate(
-   name: 'libspdlog',
-   filebase: 'spdlog',
-   description: 'Fast C++ logging library.',
-   url: 'https://github.com/gabime/spdlog',
+   )
+ else
+   spdlog_dep = declare_dependency(
+     include_directories: inc,
+     dependencies: spdlog_dependencies,
+     compile_args: spdlog_compile_args,
+   )
+ endif
+-
+-# install header and pkg-config file
+-install_subdir('include/spdlog', install_dir: get_option('includedir'))
+-pkg = import('pkgconfig')
+-pkg.generate(
+-  name: 'libspdlog',
+-  filebase: 'spdlog',
+-  description: 'Fast C++ logging library.',
+-  url: 'https://github.com/gabime/spdlog',
 -  libraries: [spdlog_dep, fmt_dep],
-+  libraries: [spdlog_dep],
-   extra_cflags: spdlog_compile_args,
- )
- 
- subdir('tests')
-diff -ru8 spdlog-1.15.0.orig/src/meson.build spdlog-1.15.0/src/meson.build
---- spdlog-1.15.0.orig/src/meson.build	2025-01-16 16:21:17.485322144 +0100
-+++ spdlog-1.15.0/src/meson.build	2025-01-16 16:22:26.879845119 +0100
+-  extra_cflags: spdlog_compile_args,
+-)
+-
+-subdir('tests')
+diff -ru8bBwd spdlog-1.15.0.orig/src/meson.build spdlog-1.15.0/src/meson.build
+--- spdlog-1.15.0.orig/src/meson.build	2025-01-23 08:31:58.995381813 +0100
++++ spdlog-1.15.0/src/meson.build	2025-01-23 08:33:19.400788837 +0100
 @@ -1,20 +1,17 @@
  src = files(
    'async.cpp',
