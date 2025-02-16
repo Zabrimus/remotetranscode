@@ -1,0 +1,162 @@
+diff --git a/src/addonhandler.cpp b/src/addonhandler.cpp
+index 49a9527..a0ca75f 100644
+--- a/src/addonhandler.cpp
++++ b/src/addonhandler.cpp
+@@ -374,6 +374,18 @@ std::string path;
+         return kodi.inputstream->toAddon->seek_stream(kodi.inputstream, position, whence);
+     }
+ 
++    int64_t AddonHandler::PositionStream() {
++        return kodi.inputstream->toAddon->position_stream(kodi.inputstream);
++    }
++
++    int64_t AddonHandler::LengthStream() {
++        return kodi.inputstream->toAddon->length_stream(kodi.inputstream);
++    }
++
++    bool AddonHandler::IsRealTimeStream() {
++        return kodi.inputstream->toAddon->is_real_time_stream(kodi.inputstream);
++    }
++
+     char * AddonHandler::get_user_path(void * kodiBase) {
+         char *c = strdup(path.c_str());
+         return c;
+diff --git a/src/addonhandler.h b/src/addonhandler.h
+index bd740fd..49b580f 100644
+--- a/src/addonhandler.h
++++ b/src/addonhandler.h
+@@ -60,4 +60,7 @@ public:
+     int GetTime();
+     int64_t SeekStream(int64_t position, int whence);
+ 
++    int64_t PositionStream();
++    int64_t LengthStream();
++    bool IsRealTimeStream();
+ };
+diff --git a/src/streamplayer.cpp b/src/streamplayer.cpp
+index ed63fbe..a37040c 100644
+--- a/src/streamplayer.cpp
++++ b/src/streamplayer.cpp
+@@ -81,7 +81,6 @@ static inline uint64_t GetusTicks(void) {
+ 
+ 
+ std::string headers = "User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML. like Gecko) Chrome/116.0.0.0&Content-Type=application/octet-stream";
+-int sockfd;
+ typedef struct {
+         uint8_t *data;
+         int size;
+@@ -89,19 +88,8 @@ typedef struct {
+ } cbuf;
+ 
+ void sendpacket(uint8_t *p,int size) {
+-    int n = 0;
+-    do {
+-        ssize_t r = write(sockfd,p,size);
+-        //if (r != size) printf("sendpacket only %d\n",r);
+-        if (r < 0) {
+-            usleep(10);
+-            //printf("failure write %d\n",r);
+-        }
+-        else {
+-            n += r;
+-        }
+-        
+-    } while (n < size);
++    // print to stdout
++    write(1, p, size);
+ }
+ 
+ // create Ringbuffer for output buffer
+@@ -109,10 +97,10 @@ circular_buffer<cbuf, 100> rbuf;
+ 
+ //A callback where all the TS-packets are sent from the multiplexer
+ void muxOutput(mpegts::SimpleBuffer &rTsOutBuffer, uint8_t tag){
+-    static int startbuffer = 20;    
++    static int startbuffer = 20;
+     cbuf buf;
+     if (rTsOutBuffer.size() % 188) {
+-        printf("packetsize wrong\n");
++        fprintf(stderr, "packetsize wrong\n");
+         return;
+     }
+     if (startbuffer > 0) {                  // Buffer first 20 packets
+@@ -145,35 +133,6 @@ StreamPlayer::StreamPlayer(int portnr) {
+     NALUHeader.sync[3] = 1;
+     NALUHeader.nalu = 9;
+     NALUHeader.length[0] = 0x10;
+-    
+-        // Open output Socket
+-    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+-        
+-    if (sockfd < 0) {
+-        printf("ERROR opening socket\n");
+-        exit(0);
+-    }
+-
+-    server = gethostbyname("127.0.0.1");
+-    if (server == NULL) {
+-        fprintf(stderr,"ERROR, no such host\n");
+-        exit(0);
+-    }
+-    
+-    bzero((char *) &serv_addr, sizeof(serv_addr));
+-    serv_addr.sin_family = AF_INET;
+-    bcopy((char *)server->h_addr, 
+-        (char *)&serv_addr.sin_addr.s_addr,
+-        server->h_length);
+-    serv_addr.sin_port = htons(portnr);
+-
+-    int flags = fcntl(sockfd, F_GETFL);
+-    fcntl(sockfd, F_SETFL, flags&~SOCK_NONBLOCK);
+-
+-    if (connect(sockfd,(struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0) {
+-        printf("ERROR connecting\n");
+-        exit(0);
+-    }
+ 
+     //Create the map defining what datatype to map to what PID
+     std::map<uint8_t, int> streamPidMap;
+@@ -191,8 +150,7 @@ StreamPlayer::StreamPlayer(int portnr) {
+ 
+ StreamPlayer::~StreamPlayer() {
+     if (m_thread.joinable())
+-        m_thread.join();  
+-    close(sockfd);
++        m_thread.join();
+ };
+ #if 0
+ void StreamPlayer::send_packet(uint8_t *p,int size) {
+@@ -255,17 +213,17 @@ void StreamPlayer::StreamPlay(AddonHandler *h) {
+     
+     //m_thread = std::thread (&StreamPlayer::Send_thread,this);
+ 
+-    if (verbose) printf("Sucessfull opened Addon\n");
++    if (verbose) fprintf(stderr, "Sucessfull opened Addon\n");
+     h->GetCapabilities();
+     
+     if (h->GetStreamIDs()) {
+         BitstreamConverterInit();
+-        if (verbose) printf("Streamcount %d\n",IDs.m_streamCount);
++        if (verbose) fprintf(stderr, "Streamcount %d\n",IDs.m_streamCount);
+         for (int i=0;i<IDs.m_streamCount;i++) {
+-            if (verbose) printf("No. ID%d %d\n",i,IDs.m_streamIds[i]);
++            if (verbose) fprintf(stderr, "No. ID%d %d\n",i,IDs.m_streamIds[i]);
+             h->GetStream(IDs.m_streamIds[i]);   // Build ID Table:
+         }
+-        if (verbose) printf("\n\n");
++        if (verbose) fprintf(stderr, "\n\n");
+         h->SelectStreams(&VideoID,&AudioID);
+         
+         h->EnableStream(IDs.m_streamIds[VideoID],true);  // Enable Video Stream
+@@ -286,9 +244,9 @@ void StreamPlayer::StreamPlay(AddonHandler *h) {
+                         
+             if (demux) {
+ 
+-                //printf("PTS %f Disptime %d StreamId %p\n",demux->pts,demux->duration,demux->iStreamId);
++                // printf("PTS %f Disptime %d StreamId %p\n",demux->pts,demux->duration,demux->iStreamId);
+                 if (demux->iStreamId == DMX_SPECIALID_STREAMCHANGE) {
+-                    if (verbose) printf("STREAMCHANGE DETECTED Size \n");
++                    if (verbose) fprintf(stderr, "STREAMCHANGE DETECTED Size \n");
+                     
+                     CBitstreamConverterClose();
+                     h->OpenStream(IDs.m_streamIds[ID]);
