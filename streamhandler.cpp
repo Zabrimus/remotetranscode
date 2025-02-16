@@ -2,10 +2,20 @@
 #include <chrono>
 #include <iostream>
 #include <fstream>
-#include "ffmpeghandler.h"
+#include "streamhandler.h"
 #include "logger.h"
 
 std::map<std::string, std::string> transparentVideos;
+
+std::string getexepath() {
+    char result[ PATH_MAX ];
+    ssize_t count = readlink( "/proc/self/exe", result, PATH_MAX );
+    return std::string(result, static_cast<unsigned long>((count > 0) ? count : 0));
+}
+
+bool startsWith(const std::string& str, const std::string& prefix) {
+    return str.size() >= prefix.size() && 0 == str.compare(0, prefix.size(), prefix);
+}
 
 bool endsWith(const std::string& str, const std::string& suffix) {
     return str.size() >= suffix.size() && 0 == str.compare(str.size()-suffix.size(), suffix.size(), suffix);
@@ -26,14 +36,17 @@ std::vector<std::string> split(std::string s, std::string delimiter) {
     return res;
 }
 
-FFmpegHandler::FFmpegHandler(std::string browserIp, int browserPort, std::string vdrIp, int vdrPort, TranscodeConfig& tc, BrowserClient *client, std::string movie_path, const std::string& tmovie) : browserIp(browserIp), browserPort(browserPort), browserClient(client), transcodeConfig(tc), movie_path(movie_path), transparent_movie(tmovie) {
+StreamHandler::StreamHandler(std::string browserIp, int browserPort, std::string vdrIp, int vdrPort, TranscodeConfig& tc, BrowserClient *client, std::string movie_path, const std::string& tmovie) : browserIp(browserIp), browserPort(browserPort), browserClient(client), transcodeConfig(tc), movie_path(movie_path), transparent_movie(tmovie) {
     streamHandler = nullptr;
     streamError = false;
     stopRequest = false;
+    isMpdStream = false;
+    enableKodi = false;
+    kodiPath = std::string();
     vdrClient = new VdrClient(vdrIp, vdrPort);
 }
 
-FFmpegHandler::~FFmpegHandler() {
+StreamHandler::~StreamHandler() {
     streamError = false;
     stopRequest = false;
     stopVideo();
@@ -41,7 +54,12 @@ FFmpegHandler::~FFmpegHandler() {
     delete vdrClient;
 }
 
-std::shared_ptr<std::string> FFmpegHandler::probeVideo(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent, std::string postfix) {
+void StreamHandler::setKodi(bool enable, std::string path) {
+    this->enableKodi = enable;
+    this->kodiPath = std::move(path);
+}
+
+std::shared_ptr<std::string> StreamHandler::probeVideo(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent, std::string postfix) {
     currentUrl = url;
     this->cookies = cookies;
     this->referer = referer;
@@ -72,8 +90,11 @@ std::shared_ptr<std::string> FFmpegHandler::probeVideo(std::string url, std::str
 
         videoInfo = std::make_shared<std::string>();
         *videoInfo = std::string("m3u video stream");
+    } else if (enableKodi && endsWith(url, ".mpd")) {
+        videoInfo = probeDash2ts(url);
+        isMpdStream = true;
     } else {
-        videoInfo = probe(url);
+        videoInfo = probeFfmpeg(url);
     }
 
     if (videoInfo == nullptr) {
@@ -87,7 +108,7 @@ std::shared_ptr<std::string> FFmpegHandler::probeVideo(std::string url, std::str
     return nullptr;
 }
 
-std::vector<std::string> FFmpegHandler::prepareStreamCmd(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent) {
+std::vector<std::string> StreamHandler::prepareStreamCmd(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent) {
     // create parameter list
     std::vector<std::string> callStr {
             "ffmpeg", "-hide_banner", "-re", "-y"
@@ -186,7 +207,7 @@ std::vector<std::string> FFmpegHandler::prepareStreamCmd(std::string url, std::s
     return callStr;
 }
 
-std::vector<std::string> FFmpegHandler::prepareStreamM3uCmd(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent) {
+std::vector<std::string> StreamHandler::prepareStreamM3uCmd(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent) {
     // create parameter list
     std::vector<std::string> callStr {
             "ffmpeg", "-hide_banner", "-re", "-y"
@@ -268,7 +289,27 @@ std::vector<std::string> FFmpegHandler::prepareStreamM3uCmd(std::string url, std
     return callStr;
 }
 
-bool FFmpegHandler::streamVideo(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent) {
+std::vector<std::string> StreamHandler::prepareStreamDash2tsCmd(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent) {
+    std::string exepath = getexepath();
+    std::string dash2ts_bin = exepath.substr(0, exepath.find_last_of('/')) + "/r_dash2ts";
+
+    // TODO: Position is not yet recognized
+
+    // get stream infos
+    DEBUG("Starte r_dash2ts");
+    std::vector<std::string> callStr{
+            dash2ts_bin,
+            "-u", url,
+            "-a", userAgent,
+            "-c", cookies,
+            "-r", referer,
+            "-k", kodiPath
+    };
+
+    return callStr;
+}
+
+bool StreamHandler::streamVideo(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent) {
     currentUrl = url;
     this->cookies = cookies;
     this->referer = referer;
@@ -282,6 +323,9 @@ bool FFmpegHandler::streamVideo(std::string url, std::string position, std::stri
     if (endsWith(url, ".m3u") || endsWith(url, ".m3u8")) {
         DEBUG("Pepare stream video (m3u)");
         callStr = prepareStreamM3uCmd(url, position, cookies, referer, userAgent);
+    } else if (isMpdStream) {
+        DEBUG("Pepare stream video (dash2ts)");
+        callStr = prepareStreamDash2tsCmd(url, position, cookies, referer, userAgent);
     } else {
         DEBUG("Pepare stream video (non-m3u)");
         callStr = prepareStreamCmd(url, position, cookies, referer, userAgent);
@@ -329,7 +373,7 @@ bool FFmpegHandler::streamVideo(std::string url, std::string position, std::stri
     return true;
 }
 
-bool FFmpegHandler::pauseVideo() {
+bool StreamHandler::pauseVideo() {
     if (streamHandler != nullptr) {
         stopVideo();
     }
@@ -337,13 +381,13 @@ bool FFmpegHandler::pauseVideo() {
     return true;
 }
 
-bool FFmpegHandler::resumeVideo(std::string position) {
+bool StreamHandler::resumeVideo(std::string position) {
     streamVideo(currentUrl, position, cookies, referer, userAgent);
 
     return true;
 }
 
-void FFmpegHandler::stopVideo() {
+void StreamHandler::stopVideo() {
     if (streamHandler != nullptr) {
         streamHandler->kill(true);
         streamHandler->get_exit_status();
@@ -352,7 +396,7 @@ void FFmpegHandler::stopVideo() {
     }
 }
 
-bool FFmpegHandler::seekTo(std::string pos) {
+bool StreamHandler::seekTo(std::string pos) {
     pauseVideo();
     vdrClient->Seeked();
     resumeVideo(pos);
@@ -360,7 +404,7 @@ bool FFmpegHandler::seekTo(std::string pos) {
     return true;
 }
 
-std::shared_ptr<std::string> FFmpegHandler::probe(const std::string& url) {
+std::shared_ptr<std::string> StreamHandler::probeFfmpeg(const std::string& url) {
     auto output = std::make_shared<std::string>();
     auto videoResult = std::make_shared<std::string>();
 
@@ -501,7 +545,7 @@ std::shared_ptr<std::string> FFmpegHandler::probe(const std::string& url) {
                 if (el.contains("sample_rate")) {
                     std::string sr = el["sample_rate"];
                     if (sr == "0") {
-                        int idx = el["index"];
+                        // int idx = el["index"];
 
                         // it is possible that the valid audio streams are shuffled.
                         // Let ffmpeg decide which streams to copy.
@@ -558,7 +602,81 @@ std::shared_ptr<std::string> FFmpegHandler::probe(const std::string& url) {
     return videoResult;
 }
 
-bool FFmpegHandler::createVideoWithLength(std::string seconds, const std::string& name) {
+std::shared_ptr<std::string> StreamHandler::probeDash2ts(const std::string& url) {
+    auto output = std::make_shared<std::string>();
+    auto videoResult = std::make_shared<std::string>();
+
+    bstreams.clear();
+
+    std::string exepath = getexepath();
+    std::string dash2ts_bin = exepath.substr(0, exepath.find_last_of('/')) + "/r_dash2ts";
+
+    // get stream infos
+    DEBUG("Starte r_dash2ts");
+    std::vector<std::string> callStr{
+            dash2ts_bin,
+            "-u", url,
+            "-a", userAgent,
+            "-c", cookies,
+            "-r", referer,
+            "-k", kodiPath,
+            "-p"
+    };
+
+    TinyProcessLib::Process process(callStr, "", [output](const char *bytes, size_t n) {
+        *output += std::string(bytes, n);
+    });
+
+    int exit = process.get_exit_status();
+
+    DEBUG("Probe exit code: {}", exit);
+    if (exit == 1) {
+        ERROR("Probe of '{}' failed.", url);
+        return nullptr;
+    }
+
+    std::ostringstream paramOut;
+    if (!callStr.empty()) {
+        std::copy(callStr.begin(), callStr.end() - 1, std::ostream_iterator<std::string>(paramOut, " "));
+        paramOut << callStr.back();
+    }
+
+    DEBUG("Call r_dash2ts: {}", paramOut.str());
+    DEBUG("OUTPUT( {} ) {}", exit, *output);
+
+    int tdur;
+    int ttime;
+    int tcap;
+    long pos;
+    long length;
+    int realTime;
+
+    auto idx = output->find("dash2ts result:");
+    sscanf(output->substr(idx).c_str(), "dash2ts result:%d:%d:%d:%ld:%ld:%d", &tdur, &ttime, &tcap, &pos, &length, &realTime);
+
+    duration = std::to_string(tdur / 1000 + 1);
+    capabilities = tcap;
+
+    DEBUG("Duration: {}", (tdur / 1000));
+    DEBUG("Time:     {}", ttime);
+    DEBUG("Position: {}", pos);
+    DEBUG("Length:   {}", length);
+    DEBUG("RealTime: {}", realTime ? "yes" : "no");
+    DEBUG("Capabilities");
+    DEBUG("   - Demux support:    {}", capabilities & (1 << 0) ? "yes" : "no");
+    DEBUG("   - Time support:     {}", capabilities & (1 << 1) ? "yes" : "no");
+    DEBUG("   - Times support:    {}", capabilities & (1 << 2) ? "yes" : "no");
+    DEBUG("   - Seek support:     {}", capabilities & (1 << 3) ? "yes" : "no");
+    DEBUG("   - Pause support:    {}", capabilities & (1 << 4) ? "yes" : "no");
+    DEBUG("   - Pos time support: {}", capabilities & (1 << 5) ? "yes" : "no");
+    DEBUG("   - Chapter support:  {}", capabilities & (1 << 6) ? "yes" : "no");
+
+    *videoResult = "mpeg dash";
+
+    return videoResult;
+}
+
+bool StreamHandler::createVideoWithLength(std::string seconds, const std::string& name) {
     auto output = std::make_shared<std::string>();
     std::string video;
 
@@ -602,7 +720,7 @@ bool FFmpegHandler::createVideoWithLength(std::string seconds, const std::string
     }
 }
 
-std::string FFmpegHandler::getAudioInfo() {
+std::string StreamHandler::getAudioInfo() {
     json result;
 
     // add audio streams

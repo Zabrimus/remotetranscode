@@ -13,19 +13,25 @@ using json = nlohmann::json;
 
 extern std::map<std::string, std::string> transparentVideos;
 
-class FFmpegHandler {
+class StreamHandler {
 private:
     std::string ffmpeg;
 
     TinyProcessLib::Process *streamHandler;
     std::thread *readerThread;
 
-public:
-    FFmpegHandler(std::string browserIp, int browserPort, std::string vdrIp, int vdrPort, TranscodeConfig& tc, BrowserClient* client, std::string movie_path, const std::string& transparent_movie);
-    ~FFmpegHandler();
+    bool enableKodi;
+    std::string kodiPath;
+    bool isMpdStream;
+    int capabilities;
 
-    std::shared_ptr<std::string>
-    probeVideo(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent, std::string postfix);
+public:
+    StreamHandler(std::string browserIp, int browserPort, std::string vdrIp, int vdrPort, TranscodeConfig& tc, BrowserClient* client, std::string movie_path, const std::string& transparent_movie);
+    ~StreamHandler();
+
+    void setKodi(bool enable, std::string path);
+
+    std::shared_ptr<std::string> probeVideo(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent, std::string postfix);
     bool streamVideo(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent);
     bool pauseVideo();
     bool resumeVideo(std::string position);
@@ -71,9 +77,11 @@ private:
 
 
 private:
-    std::shared_ptr<std::string> probe(const std::string& url);
+    std::shared_ptr<std::string> probeFfmpeg(const std::string& url);
+    std::shared_ptr<std::string> probeDash2ts(const std::string& url);
     bool createVideoWithLength(std::string seconds, const std::string& name);
 
     std::vector<std::string> prepareStreamCmd(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent);
     std::vector<std::string> prepareStreamM3uCmd(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent);
+    std::vector<std::string> prepareStreamDash2tsCmd(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent);
 };

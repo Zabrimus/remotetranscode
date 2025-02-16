@@ -1,12 +1,9 @@
 /.idea/
 /build/
+/buildDir/
 /subprojects/packagecache/
-/subprojects/spdlog-1.11.0/
 /subprojects/mINI-0.9.14/
 /subprojects/tiny-process-library-4bf0e59e64f18d3080a1ce4e853775de2181e993/
-
-/subprojects/mINI-0.9.14/
-/subprojects/packagecache/
-/subprojects/spdlog-1.12.0/
-/subprojects/tiny-process-library-4bf0e59e64f18d3080a1ce4e853775de2181e993/
+/subprojects/spdlog-1.15.0/
+/subprojects/dash2ts-f74282ac2183df2edc4fd0f5ed10e9eda7df7f9d/
 /analyze/

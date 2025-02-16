@@ -3,7 +3,7 @@ project('remotetranscode', 'cpp', 'c',
   default_options : ['warning_level=1', 'c_std=c17', 'cpp_std=c++17'],
   meson_version: '>=0.63.0')
 
-add_global_arguments(language : 'cpp')
+add_global_arguments('-O3', language : 'cpp')
 
 cmake = import('cmake')
 cpp = meson.get_compiler('cpp')
@@ -31,11 +31,22 @@ tiny_process_library_dep = tiny_process_library_proj.get_variable('tiny_process_
 mini_proj = subproject('mini')
 mini_dep = mini_proj.get_variable('mini_dep')
 
-exe = executable('remotrans', 'main.cpp', 'logger.cpp', 'ffmpeghandler.cpp', 'browserclient.cpp', 'transcodeconfig.cpp', 'vdrclient.cpp',
-                 'm3u8handler.cpp',
-                 install : true,
-                 install_dir : meson.current_build_dir() + '/Release',
-                 dependencies: [mini_dep, spdlog_dep, tiny_process_library_dep, openssl_dep])
+#
+# dash2ts
+#
+dash2ts_proj = subproject('dash2ts')
+dash2ts_dep = dash2ts_proj.get_variable('dash2ts_dep')
+
+remotrans = executable('remotrans', 'main.cpp', 'logger.cpp', 'streamhandler.cpp', 'browserclient.cpp', 'transcodeconfig.cpp', 'vdrclient.cpp',
+                        'm3u8handler.cpp',
+                        install : true,
+                        install_dir : meson.current_build_dir() + '/Release',
+                        dependencies: [mini_dep, spdlog_dep, tiny_process_library_dep, openssl_dep])
+
+r_dash2ts = executable('r_dash2ts', 'r_dash2ts.cpp', 'logger.cpp',
+                       install : true,
+                       install_dir : meson.current_build_dir() + '/Release',
+                       dependencies: [spdlog_dep, dash2ts_dep])
 
 #
 # install

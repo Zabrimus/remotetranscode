@@ -8,10 +8,8 @@
 #include "httplib.h"
 
 #include "logger.h"
-#include "ffmpeghandler.h"
+#include "streamhandler.h"
 #include "transcodeconfig.h"
-#include "m3u8handler.h"
-
 
 std::string transcoderIp;
 int transcoderPort;
@@ -23,7 +21,7 @@ int seekPause;
 
 httplib::Server transcodeServer;
 
-std::map<std::string, FFmpegHandler*> handler;
+std::map<std::string, StreamHandler*> handler;
 std::map<std::string, BrowserClient*> clients;
 
 std::mutex httpMutex;
@@ -31,6 +29,9 @@ std::mutex httpMutex;
 BrowserClient* browserClient;
 
 TranscodeConfig transcodeConfig;
+
+std::string kodiPath = "/storage/.kodi";
+bool enableKodi = false;
 
 struct SeekToRequests {
     std::string streamId;
@@ -104,6 +105,10 @@ void startHttpServer(std::string tIp, int tPort, std::string movie_path, std::st
         auto vdrPort = req.get_param_value("vdrPort");
         auto postfix = req.get_param_value("postfix");
 
+        // ------ TEST
+        // url = "";
+        // ------ TEST
+
         if (url.empty() || responseIp.empty() || responsePort.empty() || vdrIp.empty() || vdrPort.empty()) {
             res.status = 404;
         } else {
@@ -122,15 +127,16 @@ void startHttpServer(std::string tIp, int tPort, std::string movie_path, std::st
             delete handler[streamId];
             handler.erase(streamId);
 
-            auto ffmpeg = new FFmpegHandler(responseIp, std::stoi(responsePort), vdrIp, std::stoi(vdrPort), transcodeConfig, clients[streamId], movie_path, transparentMovie);
-            handler[streamId] = ffmpeg;
+            auto stream = new StreamHandler(responseIp, std::stoi(responsePort), vdrIp, std::stoi(vdrPort), transcodeConfig, clients[streamId], movie_path, transparentMovie);
+            stream->setKodi(enableKodi, kodiPath);
+            handler[streamId] = stream;
 
             DEBUG("Probe video...");
-            auto videoInfo = ffmpeg->probeVideo(url, "0", cookies, referer, userAgent, postfix);
+            auto videoInfo = stream->probeVideo(url, "0", cookies, referer, userAgent, postfix);
 
             if (videoInfo == nullptr) {
                 res.status = 500;
-                res.set_content("Unable to probe video", "text/plain");
+                res.set_content("Unable to probeFfmpeg video", "text/plain");
             } else {
                 res.status = 200;
                 res.set_content(*videoInfo, "text/plain");
@@ -150,6 +156,10 @@ void startHttpServer(std::string tIp, int tPort, std::string movie_path, std::st
         auto vdrIp = req.get_param_value("vdrIp");
         auto vdrPort = req.get_param_value("vdrPort");
 
+        // ----------------- TEST
+        // url = "";
+        // ----------------- TEST
+
         if (url.empty() || responseIp.empty() || responsePort.empty()) {
             res.status = 404;
         } else {
@@ -158,9 +168,9 @@ void startHttpServer(std::string tIp, int tPort, std::string movie_path, std::st
             std::string streamId = responseIp + "_" + responsePort;
 
             // call of probe before StreamUrl is a must
-            auto ffmpeg = handler[streamId];
+            auto stream = handler[streamId];
 
-            if (ffmpeg == nullptr) {
+            if (stream == nullptr) {
                 ERROR("Probe has not been called before StreamUrl. Aborting...");
                 res.status = 500;
                 res.set_content("Probe has not been called before StreamUrl. Aborting...", "text/plain");
@@ -168,7 +178,7 @@ void startHttpServer(std::string tIp, int tPort, std::string movie_path, std::st
             }
 
             DEBUG("Start video streaming...");
-            ffmpeg->streamVideo(url, "0", cookies, referer, userAgent);
+            stream->streamVideo(url, "0", cookies, referer, userAgent);
 
             res.status = 200;
             res.set_content("ok", "text/plain");
@@ -377,6 +387,8 @@ int main(int argc, char* argv[]) {
             { "loglevel",    optional_argument, nullptr, 'l' },
             { "seekPause",   optional_argument, nullptr, 's' },
             { "bindall",     optional_argument, nullptr, 'b' },
+            { "kodipath",    optional_argument, nullptr, 'k' },
+            { "enablekodi",  optional_argument, nullptr, 'a' },
             {nullptr }
     };
 
@@ -384,7 +396,7 @@ int main(int argc, char* argv[]) {
     bool bindAll = false;
 
     seekPause = 500;
-    while ((c = getopt_long(argc, argv, "c:t:m:l:s:b", long_options, &option_index)) != -1) {
+    while ((c = getopt_long(argc, argv, "c:t:m:l:s:bak:", long_options, &option_index)) != -1) {
         switch (c) {
             case 'c':
                 if (!readConfiguration(optarg)) {
@@ -413,6 +425,14 @@ int main(int argc, char* argv[]) {
             case 'b':
                 bindAll = true;
                 break;
+
+            case 'a':
+                enableKodi = true;
+                break;
+
+            case 'k':
+                kodiPath = std::string(optarg);
+                break;
         }
     }
 
@@ -423,6 +443,10 @@ int main(int argc, char* argv[]) {
         case 3:  logger.set_level(spdlog::level::debug); break;
         case 4:  logger.set_level(spdlog::level::trace); break;
         default: logger.set_level(spdlog::level::err); break;
+    }
+
+    if (enableKodi) {
+        INFO("Kodi has been enabled (-a). This is an experimental feature!");
     }
 
     // read whole transparent file into memory
@@ -453,7 +477,7 @@ int main(int argc, char* argv[]) {
         for (auto it = handler.cbegin(); it != handler.cend(); ) {
             if (it->second) {
                 if (it->second->stopHandler()) {
-                    FFmpegHandler* h = it->second;
+                    StreamHandler* h = it->second;
                     handler.erase(it++);
                     h->stopVideo();
                     delete h;

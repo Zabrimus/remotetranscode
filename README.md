@@ -23,6 +23,8 @@ It's safe to use the same sockets.ini for all of the three parts (vdr-plugin-web
 -m / --movie <directory of the movie files, default ./movie (optional parameter)
 -l / --loglevel <level> (from 0 to 4, where 4 means very, very verbose logging)
 -s / --seekPause <ms> (wait ms milliseconds before really doing a video jump. In the meantime all jumps are collected)
+-a / --enablekodi (use Kodi inputstream-adaptive for mpeg dash (Very experimental!)
+-k / --kodipath The path to inputstream-adaptive. (Default: /.storage/.kodi) 
 ```
 
 ## Logging
