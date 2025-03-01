@@ -360,6 +360,10 @@ bool StreamHandler::streamVideo(std::string url, std::string position, std::stri
             // catch errors
             std::string msg = std::string(bytes, n);
 
+            if (isMpdStream) {
+                fprintf(stderr, "%s\n", msg.c_str());
+            }
+
             if (msg.find("Failed to seek for auxiliary info") != std::string::npos) {
                 // stop reader thread
                 streamError = true;

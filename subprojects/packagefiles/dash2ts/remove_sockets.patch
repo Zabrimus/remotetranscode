@@ -1,11 +1,43 @@
 diff --git a/src/addonhandler.cpp b/src/addonhandler.cpp
-index 49a9527..a0ca75f 100644
+index 49a9527..e257b5e 100644
 --- a/src/addonhandler.cpp
 +++ b/src/addonhandler.cpp
-@@ -374,6 +374,18 @@ std::string path;
+@@ -342,6 +342,27 @@ std::string path;
+         return demux;
+     }
+ 
++    void AddonHandler::DenuxReset() {
++        if (!kodi.inputstream->toAddon->demux_reset) // does lib provide this function
++            return;
++
++        kodi.inputstream->toAddon->demux_reset(kodi.inputstream);
++    }
++
++    void AddonHandler::DenuxAbort() {
++        if (!kodi.inputstream->toAddon->demux_abort) // does lib provide this function
++            return;
++
++        kodi.inputstream->toAddon->demux_abort(kodi.inputstream);
++    }
++
++    void AddonHandler::DenuxSetSpeed(int speed) {
++        if (!kodi.inputstream->toAddon->demux_set_speed) // does lib provide this function
++            return;
++
++        kodi.inputstream->toAddon->demux_set_speed(kodi.inputstream, speed);
++    }
++
+     int AddonHandler::Read(uint8_t* buf, int buf_size)
+     {
+         if (!kodi.inputstream->toAddon->read_stream)
+@@ -374,6 +395,82 @@ std::string path;
          return kodi.inputstream->toAddon->seek_stream(kodi.inputstream, position, whence);
      }
  
++    bool AddonHandler::PosTime(int ms) {
++        return kodi.inputstream->toAddon->pos_time(kodi.inputstream, ms);
++    }
++
 +    int64_t AddonHandler::PositionStream() {
 +        return kodi.inputstream->toAddon->position_stream(kodi.inputstream);
 +    }
@@ -18,26 +50,133 @@ index 49a9527..a0ca75f 100644
 +        return kodi.inputstream->toAddon->is_real_time_stream(kodi.inputstream);
 +    }
 +
++    bool AddonHandler::SeekTime(double time, bool backwards, double *startpts) {
++        return kodi.inputstream->toAddon->demux_seek_time(kodi.inputstream, time, backwards, startpts);
++    }
++
++    const char* AddonHandler::GetPathList() {
++        if (!kodi.inputstream->toAddon->get_path_list) // does lib provide this function
++            return nullptr;
++
++        return kodi.inputstream->toAddon->get_path_list(kodi.inputstream);
++    }
++
++    bool AddonHandler::GetTimes(struct INPUTSTREAM_TIMES* times) {
++        if (!kodi.inputstream->toAddon->get_times) // does lib provide this function
++            return false;
++
++        return kodi.inputstream->toAddon->get_times(kodi.inputstream, times);
++    }
++
++    int AddonHandler::GetChapter() {
++        if (!kodi.inputstream->toAddon->get_chapter) // does lib provide this function
++            return -1;
++
++        return kodi.inputstream->toAddon->get_chapter(kodi.inputstream);
++    }
++
++    int AddonHandler::GetChapterCount() {
++        if (!kodi.inputstream->toAddon->get_chapter_count) // does lib provide this function
++            return -1;
++
++        return kodi.inputstream->toAddon->get_chapter_count(kodi.inputstream);
++    }
++
++    const char* AddonHandler::GetChapterName(int ch) {
++        if (!kodi.inputstream->toAddon->get_chapter_name) // does lib provide this function
++            return nullptr;
++
++        return kodi.inputstream->toAddon->get_chapter_name(kodi.inputstream, ch);
++    }
++
++    int64_t AddonHandler::GetChapterPos(int ch) {
++        if (!kodi.inputstream->toAddon->get_chapter_pos) // does lib provide this function
++            return -1;
++
++        return kodi.inputstream->toAddon->get_chapter_pos(kodi.inputstream, ch);
++    }
++
++    bool AddonHandler::SeekChapter(int ch) {
++        if (!kodi.inputstream->toAddon->seek_chapter) // does lib provide this function
++            return -1;
++
++        return kodi.inputstream->toAddon->seek_chapter(kodi.inputstream, ch);
++    }
++
++    int AddonHandler::BlockSizeStream() {
++        if (!kodi.inputstream->toAddon->block_size_stream) // does lib provide this function
++            return false;
++
++        return kodi.inputstream->toAddon->block_size_stream(kodi.inputstream);
++    }
++
      char * AddonHandler::get_user_path(void * kodiBase) {
          char *c = strdup(path.c_str());
          return c;
+@@ -396,6 +493,4 @@ std::string path;
+ 
+     int AddonHandler::LoadXML(std::string xmlfile) {
+         return ReadXML(xmlfile.c_str());
+-    }
+-    
+-
++    }
+\ No newline at end of file
 diff --git a/src/addonhandler.h b/src/addonhandler.h
-index bd740fd..49b580f 100644
+index bd740fd..750da3d 100644
 --- a/src/addonhandler.h
 +++ b/src/addonhandler.h
-@@ -60,4 +60,7 @@ public:
+@@ -18,6 +18,7 @@ extern "C" {
+ #define DMX_SPECIALID_STREAMCHANGE -11
+ 
+ extern bool verbose;
++extern bool saveonly;
+ extern struct INPUTSTREAM_IDS IDs;
+ 
+ class AddonHandler
+@@ -59,5 +60,21 @@ public:
+     int GetTotalTime(int streamID, bool enable);
      int GetTime();
      int64_t SeekStream(int64_t position, int whence);
++    bool PosTime(int ms);
  
 +    int64_t PositionStream();
 +    int64_t LengthStream();
 +    bool IsRealTimeStream();
++    bool SeekTime(double time, bool backwards, double* startpts);
++    void DenuxReset();
++    void DenuxAbort();
++    void DenuxSetSpeed(int speed);
++    const char *GetPathList();
++    bool GetTimes(INPUTSTREAM_TIMES *times);
++    int GetChapter();
++    int GetChapterCount();
++    const char *GetChapterName(int ch);
++    int64_t GetChapterPos(int ch);
++    bool SeekChapter(int ch);
++    int BlockSizeStream();
  };
 diff --git a/src/streamplayer.cpp b/src/streamplayer.cpp
-index ed63fbe..a37040c 100644
+index ed63fbe..492db0c 100644
 --- a/src/streamplayer.cpp
 +++ b/src/streamplayer.cpp
-@@ -81,7 +81,6 @@ static inline uint64_t GetusTicks(void) {
+@@ -11,6 +11,7 @@
+ #include <netdb.h> 
+ #include <fcntl.h>
+ #include <thread>
++#include <stdio.h>
+ 
+ #include "mpegts/mpegts_muxer.h"
+ #include "circular_buffer.hpp"
+@@ -26,6 +27,7 @@ extern "C" {
+ }
+ 
+ bool verbose = false;
++bool saveonly = false;
+ 
+ #include "bitstreamconverter.h"
+ #include "audioconverter.h"
+@@ -81,7 +83,6 @@ static inline uint64_t GetusTicks(void) {
  
  
  std::string headers = "User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML. like Gecko) Chrome/116.0.0.0&Content-Type=application/octet-stream";
@@ -45,7 +184,7 @@ index ed63fbe..a37040c 100644
  typedef struct {
          uint8_t *data;
          int size;
-@@ -89,19 +88,8 @@ typedef struct {
+@@ -89,19 +90,14 @@ typedef struct {
  } cbuf;
  
  void sendpacket(uint8_t *p,int size) {
@@ -62,12 +201,18 @@ index ed63fbe..a37040c 100644
 -        }
 -        
 -    } while (n < size);
-+    // print to stdout
-+    write(1, p, size);
++    if (saveonly) {
++        FILE* f = fopen("stream_debug.ts", "a");
++        fwrite(p, size, 1, f);
++        fclose(f);
++    } else {
++        // print to stdout
++        write(1, p, size);
++    }
  }
  
  // create Ringbuffer for output buffer
-@@ -109,10 +97,10 @@ circular_buffer<cbuf, 100> rbuf;
+@@ -109,10 +105,10 @@ circular_buffer<cbuf, 100> rbuf;
  
  //A callback where all the TS-packets are sent from the multiplexer
  void muxOutput(mpegts::SimpleBuffer &rTsOutBuffer, uint8_t tag){
@@ -80,7 +225,7 @@ index ed63fbe..a37040c 100644
          return;
      }
      if (startbuffer > 0) {                  // Buffer first 20 packets
-@@ -145,35 +133,6 @@ StreamPlayer::StreamPlayer(int portnr) {
+@@ -145,35 +141,6 @@ StreamPlayer::StreamPlayer(int portnr) {
      NALUHeader.sync[3] = 1;
      NALUHeader.nalu = 9;
      NALUHeader.length[0] = 0x10;
@@ -116,7 +261,7 @@ index ed63fbe..a37040c 100644
  
      //Create the map defining what datatype to map to what PID
      std::map<uint8_t, int> streamPidMap;
-@@ -191,8 +150,7 @@ StreamPlayer::StreamPlayer(int portnr) {
+@@ -191,8 +158,7 @@ StreamPlayer::StreamPlayer(int portnr) {
  
  StreamPlayer::~StreamPlayer() {
      if (m_thread.joinable())
@@ -126,7 +271,7 @@ index ed63fbe..a37040c 100644
  };
  #if 0
  void StreamPlayer::send_packet(uint8_t *p,int size) {
-@@ -255,17 +213,17 @@ void StreamPlayer::StreamPlay(AddonHandler *h) {
+@@ -255,17 +221,17 @@ void StreamPlayer::StreamPlay(AddonHandler *h) {
      
      //m_thread = std::thread (&StreamPlayer::Send_thread,this);
  
@@ -148,7 +293,17 @@ index ed63fbe..a37040c 100644
          h->SelectStreams(&VideoID,&AudioID);
          
          h->EnableStream(IDs.m_streamIds[VideoID],true);  // Enable Video Stream
-@@ -286,9 +244,9 @@ void StreamPlayer::StreamPlay(AddonHandler *h) {
+@@ -277,6 +243,9 @@ void StreamPlayer::StreamPlay(AddonHandler *h) {
+         h->GetStream(IDs.m_streamIds[VideoID]);  // Trigger start
+         h->GetStream(IDs.m_streamIds[AudioID]);
+ 
++        long rs = h->SeekStream(2000, 0);
++        fprintf(stderr, "Seek result %ld\n", rs);
++
+         mpegts::EsFrame esFrame;
+         
+         do {
+@@ -286,9 +255,9 @@ void StreamPlayer::StreamPlay(AddonHandler *h) {
                          
              if (demux) {
  

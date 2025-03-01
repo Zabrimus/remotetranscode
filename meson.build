@@ -48,6 +48,11 @@ r_dash2ts = executable('r_dash2ts', 'r_dash2ts.cpp', 'logger.cpp',
                        install_dir : meson.current_build_dir() + '/Release',
                        dependencies: [spdlog_dep, dash2ts_dep])
 
+r_dash2tsd = executable('r_dash2ts_debug', 'r_dash2ts_debug.cpp', 'logger.cpp',
+                       install : true,
+                       install_dir : meson.current_build_dir() + '/Release',
+                       dependencies: [spdlog_dep, dash2ts_dep])
+
 #
 # install
 #

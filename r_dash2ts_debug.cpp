@@ -4,6 +4,8 @@
 #include "addonhandler.h"
 #include "logger.h"
 
+extern bool verbose;
+extern bool saveonly;
 extern std::string headers;
 
 std::string &Trim(std::string &, const char *const);
@@ -30,7 +32,6 @@ void usage() {
     printf("                 -r referer\n");
     printf("                 -k path_to_kodi\n");
     printf("                 -p probeFfmpeg only\n");
-    printf("                 [-l <level>] \n");
 }
 
 int main(int argc, char *argv[]) {
@@ -43,8 +44,11 @@ int main(int argc, char *argv[]) {
     int loglevel = 1;
     bool probeOnly = false;
 
+    verbose = true;
+    saveonly = true;
+
     int c;
-    while ((c = getopt(argc, argv, "u:a:c:r:k:l:p")) != -1) {
+    while ((c = getopt(argc, argv, "u:a:c:r:k:p")) != -1) {
         switch (c) {
             case 'u': // URL to Manifest
                 url = std::string(optarg);
@@ -64,10 +68,6 @@ int main(int argc, char *argv[]) {
 
             case 'k': // path to kodi
                 path_to_kodi = std::string(optarg);
-                continue;
-
-            case 'l': // loglevel
-                loglevel = atoi(optarg);
                 continue;
 
             case 'p': // probe only
@@ -91,14 +91,7 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    switch (loglevel) {
-        case 0:  logger.set_level(spdlog::level::critical); break;
-        case 1:  logger.set_level(spdlog::level::err); break;
-        case 2:  logger.set_level(spdlog::level::info); break;
-        case 3:  logger.set_level(spdlog::level::debug); break;
-        case 4:  logger.set_level(spdlog::level::trace); break;
-        default: logger.set_level(spdlog::level::err); break;
-    }
+    logger.set_level(spdlog::level::trace);
 
     auto handler = new AddonHandler(path_to_kodi); // Init AddonHandler
 
