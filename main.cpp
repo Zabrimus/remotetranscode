@@ -308,6 +308,9 @@ void startHttpServer(std::string tIp, int tPort, std::string movie_path, std::st
         res.set_content(transparentVideos[name.str()], "video/webm");
     });
 
+    transcodeServer.set_keep_alive_max_count(50);
+    transcodeServer.set_keep_alive_timeout(5);
+
     std::string listenIp = bindAll ? "0.0.0.0" : tIp;
     if (!transcodeServer.listen(listenIp, tPort)) {
         CRITICAL("Call of listen failed: ip {}, port {}, Reason: {}", listenIp, tPort, strerror(errno));
