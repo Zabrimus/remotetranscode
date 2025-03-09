@@ -4,6 +4,7 @@
 VdrClient::VdrClient(std::string vdrIp, int vdrPort) {
     client = new httplib::Client(vdrIp, vdrPort);
     client->set_read_timeout(15, 0);
+    client->set_keep_alive(true);
 }
 
 VdrClient::~VdrClient() {
