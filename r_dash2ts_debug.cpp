@@ -131,6 +131,49 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
+    auto caps = handler->GetCapabilities();
+
+    printf("Capabilities:\n");
+    if (caps & INPUTSTREAM_SUPPORTS_IDEMUX) {
+        printf ("  INPUTSTREAM_SUPPORTS_IDEMUX\n");
+    }
+
+    if (caps & INPUTSTREAM_SUPPORTS_IPOSTIME) {
+        printf ("  INPUTSTREAM_SUPPORTS_IPOSTIME\n");
+    }
+
+    if (caps & INPUTSTREAM_SUPPORTS_IDISPLAYTIME) {
+        printf ("  INPUTSTREAM_SUPPORTS_IDISPLAYTIME\n");
+    }
+
+    if (caps & INPUTSTREAM_SUPPORTS_SEEK) {
+        printf ("  INPUTSTREAM_SUPPORTS_SEEK\n");
+    }
+
+    if (caps & INPUTSTREAM_SUPPORTS_PAUSE) {
+        printf ("  INPUTSTREAM_SUPPORTS_PAUSE\n");
+    }
+
+    if (caps & INPUTSTREAM_SUPPORTS_ITIME) {
+        printf ("  INPUTSTREAM_SUPPORTS_ITIME\n");
+    }
+
+    if (caps & INPUTSTREAM_SUPPORTS_ICHAPTER) {
+        printf ("  INPUTSTREAM_SUPPORTS_ICHAPTER\n");
+    }
+
+    if (!handler->PosTime(1000 * 60 * 45)) {
+        printf("PosTime to 45 minutes\n");
+    } else {
+        printf("PosTime failed\n");
+    }
+
+    printf ("STREAM_MSEC_TO_TIME(0) = %f\n", STREAM_MSEC_TO_TIME(0));
+    printf ("STREAM_MSEC_TO_TIME(45 min) = %f\n", STREAM_MSEC_TO_TIME(1000 * 60 * 45));
+
+    printf("Time: %d\n", handler->GetTime());
+    printf("TotalTime: %d\n", handler->GetTotalTime(0, true));
+
     // start streaming
     auto player = new StreamPlayer(0);
     player->StreamPlay(handler);
