@@ -90,7 +90,7 @@ std::shared_ptr<std::string> StreamHandler::probeVideo(std::string url, std::str
 
         videoInfo = std::make_shared<std::string>();
         *videoInfo = std::string("m3u video stream");
-    } else if (enableKodi && endsWith(url, ".mpd")) {
+    } else if (enableKodi && (endsWith(url, ".mpd") || (url.find("hbbtv.zdf.de/zdfm3/dyn/mpd.php") != std::string::npos))) {
         videoInfo = probeDash2ts(url);
         isMpdStream = true;
     } else {
@@ -135,7 +135,7 @@ std::vector<std::string> StreamHandler::prepareStreamCmd(std::string url, std::s
     }
 
     // in case of mpeg-dash ignore the seek command
-    if (!endsWith(url, ".mpd")) {
+    if (!endsWith(url, ".mpd") && (url.find("hbbtv.zdf.de/zdfm3/dyn/mpd.php") == std::string::npos)) {
         callStr.emplace_back("-ss");
         callStr.emplace_back(position);
     }
@@ -234,7 +234,7 @@ std::vector<std::string> StreamHandler::prepareStreamM3uCmd(std::string url, std
     }
 
     // in case of mpeg-dash ignore the seek command
-    if (!endsWith(url, ".mpd")) {
+    if (!endsWith(url, ".mpd") && (url.find("hbbtv.zdf.de/zdfm3/dyn/mpd.php") == std::string::npos)) {
         callStr.emplace_back("-ss");
         callStr.emplace_back(position);
     }
