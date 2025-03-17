@@ -157,7 +157,7 @@ index bd740fd..750da3d 100644
 +    int BlockSizeStream();
  };
 diff --git a/src/streamplayer.cpp b/src/streamplayer.cpp
-index ed63fbe..492db0c 100644
+index ed63fbe..afe4675 100644
 --- a/src/streamplayer.cpp
 +++ b/src/streamplayer.cpp
 @@ -11,6 +11,7 @@
@@ -225,7 +225,17 @@ index ed63fbe..492db0c 100644
          return;
      }
      if (startbuffer > 0) {                  // Buffer first 20 packets
-@@ -145,35 +141,6 @@ StreamPlayer::StreamPlayer(int portnr) {
+@@ -136,7 +132,8 @@ void muxOutput(mpegts::SimpleBuffer &rTsOutBuffer, uint8_t tag){
+ }
+ 
+ 
+-StreamPlayer::StreamPlayer(int portnr) {
++StreamPlayer::StreamPlayer(int position) {
++    startPosition = position;
+ 
+     // Prepare NALU AUD
+     NALUHeader.sync[0] = 0;
+@@ -145,35 +142,6 @@ StreamPlayer::StreamPlayer(int portnr) {
      NALUHeader.sync[3] = 1;
      NALUHeader.nalu = 9;
      NALUHeader.length[0] = 0x10;
@@ -261,7 +271,13 @@ index ed63fbe..492db0c 100644
  
      //Create the map defining what datatype to map to what PID
      std::map<uint8_t, int> streamPidMap;
-@@ -191,8 +158,7 @@ StreamPlayer::StreamPlayer(int portnr) {
+@@ -185,14 +153,11 @@ StreamPlayer::StreamPlayer(int portnr) {
+ 
+     //Provide the callback where TS packets are fed to
+     lMuxer->tsOutCallback = std::bind(&muxOutput, std::placeholders::_1,std::placeholders::_2);
+-
+-
+ };
  
  StreamPlayer::~StreamPlayer() {
      if (m_thread.joinable())
@@ -271,7 +287,7 @@ index ed63fbe..492db0c 100644
  };
  #if 0
  void StreamPlayer::send_packet(uint8_t *p,int size) {
-@@ -255,17 +221,17 @@ void StreamPlayer::StreamPlay(AddonHandler *h) {
+@@ -255,17 +220,17 @@ void StreamPlayer::StreamPlay(AddonHandler *h) {
      
      //m_thread = std::thread (&StreamPlayer::Send_thread,this);
  
@@ -293,17 +309,16 @@ index ed63fbe..492db0c 100644
          h->SelectStreams(&VideoID,&AudioID);
          
          h->EnableStream(IDs.m_streamIds[VideoID],true);  // Enable Video Stream
-@@ -277,6 +243,9 @@ void StreamPlayer::StreamPlay(AddonHandler *h) {
+@@ -277,6 +242,8 @@ void StreamPlayer::StreamPlay(AddonHandler *h) {
          h->GetStream(IDs.m_streamIds[VideoID]);  // Trigger start
          h->GetStream(IDs.m_streamIds[AudioID]);
  
-+        long rs = h->SeekStream(2000, 0);
-+        fprintf(stderr, "Seek result %ld\n", rs);
++        h->PosTime(startPosition * 1000);
 +
          mpegts::EsFrame esFrame;
          
          do {
-@@ -286,9 +255,9 @@ void StreamPlayer::StreamPlay(AddonHandler *h) {
+@@ -286,9 +253,9 @@ void StreamPlayer::StreamPlay(AddonHandler *h) {
                          
              if (demux) {
  
@@ -315,3 +330,24 @@ index ed63fbe..492db0c 100644
                      
                      CBitstreamConverterClose();
                      h->OpenStream(IDs.m_streamIds[ID]);
+diff --git a/src/streamplayer.h b/src/streamplayer.h
+index 0bace14..12168bf 100644
+--- a/src/streamplayer.h
++++ b/src/streamplayer.h
+@@ -27,6 +27,7 @@ private:
+     bool makepmt = true;
+     mpegts::MpegTsMuxer *lMuxer;
+ 
++    int startPosition;
+     
+     int duration;  // Duration of one Frame in ms
+ 
+@@ -39,7 +40,7 @@ private:
+ 
+ public:
+ 
+-    StreamPlayer(int );
++    StreamPlayer(int position);
+     ~StreamPlayer();
+     
+     void send_packet(uint8_t *,int);

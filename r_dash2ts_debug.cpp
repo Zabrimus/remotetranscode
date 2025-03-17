@@ -162,7 +162,8 @@ int main(int argc, char *argv[]) {
         printf ("  INPUTSTREAM_SUPPORTS_ICHAPTER\n");
     }
 
-    if (!handler->PosTime(1000 * 60 * 45)) {
+    // 3183
+    if (!handler->PosTime(3183 * 1000)) {
         printf("PosTime to 45 minutes\n");
     } else {
         printf("PosTime failed\n");

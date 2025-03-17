@@ -30,6 +30,7 @@ void usage() {
     printf("                 -r referer\n");
     printf("                 -k path_to_kodi\n");
     printf("                 -p probeFfmpeg only\n");
+    printf("                 -s start position in seconds\n");
     printf("                 [-l <level>] \n");
 }
 
@@ -42,9 +43,10 @@ int main(int argc, char *argv[]) {
     int api_version = 0;
     int loglevel = 1;
     bool probeOnly = false;
+    int startPosition;
 
     int c;
-    while ((c = getopt(argc, argv, "u:a:c:r:k:l:p")) != -1) {
+    while ((c = getopt(argc, argv, "u:a:c:r:k:l:ps:")) != -1) {
         switch (c) {
             case 'u': // URL to Manifest
                 url = std::string(optarg);
@@ -72,6 +74,10 @@ int main(int argc, char *argv[]) {
 
             case 'p': // probe only
                 probeOnly = true;
+                continue;
+
+            case 's': // start position
+                startPosition = atoi(optarg);
                 continue;
 
             default:
@@ -139,7 +145,7 @@ int main(int argc, char *argv[]) {
     }
 
     // start streaming
-    auto player = new StreamPlayer(0);
+    auto player = new StreamPlayer(startPosition);
     player->StreamPlay(handler);
 
     delete handler;

@@ -155,6 +155,7 @@ void startHttpServer(std::string tIp, int tPort, std::string movie_path, std::st
         auto responsePort = req.get_param_value("responsePort");
         auto vdrIp = req.get_param_value("vdrIp");
         auto vdrPort = req.get_param_value("vdrPort");
+        auto mpdStart = req.get_param_value("mpdStart");
 
         // ----------------- TEST
         // url = "";
@@ -178,7 +179,7 @@ void startHttpServer(std::string tIp, int tPort, std::string movie_path, std::st
             }
 
             DEBUG("Start video streaming...");
-            stream->streamVideo(url, "0", cookies, referer, userAgent);
+            stream->streamVideo(url, mpdStart, cookies, referer, userAgent);
 
             res.status = 200;
             res.set_content("ok", "text/plain");
@@ -235,7 +236,7 @@ void startHttpServer(std::string tIp, int tPort, std::string movie_path, std::st
                 s.seekTo = seekTo;
                 s.streamId = streamId;
 
-                printf("Add: %ld\n", s.lastSeek.time_since_epoch().count());
+                TRACE("Add: {}", s.lastSeek.time_since_epoch().count());
 
                 seekToVec.emplace_back(s);
             }

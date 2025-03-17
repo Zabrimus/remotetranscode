@@ -289,11 +289,11 @@ std::vector<std::string> StreamHandler::prepareStreamM3uCmd(std::string url, std
     return callStr;
 }
 
-std::vector<std::string> StreamHandler::prepareStreamDash2tsCmd(std::string url, std::string position, std::string cookies, std::string referer, std::string userAgent) {
+std::vector<std::string>
+StreamHandler::prepareStreamDash2tsCmd(std::string url, std::string position, std::string cookies, std::string referer,
+                                       std::string userAgent) {
     std::string exepath = getexepath();
     std::string dash2ts_bin = exepath.substr(0, exepath.find_last_of('/')) + "/r_dash2ts";
-
-    // TODO: Position is not yet recognized
 
     // get stream infos
     DEBUG("Starte r_dash2ts");
@@ -303,7 +303,8 @@ std::vector<std::string> StreamHandler::prepareStreamDash2tsCmd(std::string url,
             "-a", userAgent,
             "-c", cookies,
             "-r", referer,
-            "-k", kodiPath
+            "-k", kodiPath,
+            "-s", position
     };
 
     return callStr;
