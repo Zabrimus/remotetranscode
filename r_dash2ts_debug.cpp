@@ -6,6 +6,8 @@
 
 extern bool verbose;
 extern bool saveonly;
+extern bool use_TCP;
+
 extern std::string headers;
 
 std::string &Trim(std::string &, const char *const);
@@ -46,6 +48,7 @@ int main(int argc, char *argv[]) {
 
     verbose = true;
     saveonly = true;
+    use_TCP = false;
 
     int c;
     while ((c = getopt(argc, argv, "u:a:c:r:k:p")) != -1) {

@@ -4,6 +4,9 @@
 #include "addonhandler.h"
 #include "logger.h"
 
+extern bool saveonly;
+extern bool use_TCP;
+
 extern std::string headers;
 
 std::string &Trim(std::string &, const char *const);
@@ -44,6 +47,8 @@ int main(int argc, char *argv[]) {
     int loglevel = 1;
     bool probeOnly = false;
     int startPosition;
+
+    use_TCP = false;
 
     int c;
     while ((c = getopt(argc, argv, "u:a:c:r:k:l:ps:")) != -1) {

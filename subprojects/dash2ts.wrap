@@ -1,10 +1,10 @@
 [wrap-file]
-directory = dash2ts-f74282ac2183df2edc4fd0f5ed10e9eda7df7f9d
-source_url = https://github.com/jojo61/dash2ts/archive/f74282ac2183df2edc4fd0f5ed10e9eda7df7f9d.zip
-source_filename = f74282ac2183df2edc4fd0f5ed10e9eda7df7f9d.zip
-source_hash = cf9e6fda252e1f7b2ae51b7721aa3a9abb5d64817c7203fe08f1c7dd505dd3fd
+directory = dash2ts-4ef8bf173f7ea355bcab7f7d42f436541d4f795a
+source_url = https://github.com/jojo61/dash2ts/archive/4ef8bf173f7ea355bcab7f7d42f436541d4f795a.zip
+source_filename = 4ef8bf173f7ea355bcab7f7d42f436541d4f795a.zip
+source_hash = cb11fd638772497dba12b03ec7d6ed87146adbb1bc1e1fa458465cc7794dcfdb
 patch_directory = dash2ts
-diff_files = dash2ts/remove_sockets.patch
+#diff_files = dash2ts/remove_sockets.patch
 
 [provide]
 dash2ts = dash2ts_dep
