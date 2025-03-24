@@ -7,9 +7,12 @@
 #define CPPHTTPLIB_OPENSSL_SUPPORT
 #include "httplib.h"
 
+#include "main.h"
 #include "logger.h"
 #include "streamhandler.h"
 #include "transcodeconfig.h"
+
+TThreadPoolServer *thriftServer;
 
 std::string transcoderIp;
 int transcoderPort;
@@ -19,19 +22,18 @@ int browserPort;
 
 int seekPause;
 
-httplib::Server transcodeServer;
-
 std::map<std::string, StreamHandler*> handler;
-std::map<std::string, BrowserClient*> clients;
 
 std::mutex httpMutex;
-
-BrowserClient* browserClient;
 
 TranscodeConfig transcodeConfig;
 
 std::string kodiPath = "/storage/.kodi";
 bool enableKodi = false;
+
+std::string movie_path = "./movie"; // default value
+std::string transparentMovie;
+bool bindAll = false;
 
 struct SeekToRequests {
     std::string streamId;
@@ -41,6 +43,164 @@ struct SeekToRequests {
 
 std::vector<SeekToRequests> seekToVec;
 bool stopSeekToThread = false;
+
+inline OperationFailed createException(int code, std::string reason) {
+    OperationFailed io;
+    io.code = code;
+    io.reason = reason;
+
+    return io;
+}
+
+RemoteTranscoderServer::~RemoteTranscoderServer() {
+}
+
+void RemoteTranscoderServer::ping() {
+}
+
+void RemoteTranscoderServer::Probe(std::string &_return, const ProbeType &input) {
+    INFO("Probe {}", input.url);
+
+    std::string streamId = input.responseIp + "_" + input.responsePort;
+
+    if (handler[streamId] != nullptr) {
+        handler[streamId]->stopVideo();
+    }
+
+    delete handler[streamId];
+    handler.erase(streamId);
+
+    auto stream = new StreamHandler(input.responseIp, std::stoi(input.responsePort), input.vdrIp, std::stoi(input.vdrPort), transcodeConfig,  movie_path, transparentMovie);
+    stream->setKodi(enableKodi, kodiPath);
+    handler[streamId] = stream;
+
+    DEBUG("Probe video...");
+    auto videoInfo = stream->probeVideo(input.url, "0", input.cookies, input.referer, input.userAgent, input.postfix);
+
+    if (videoInfo == nullptr) {
+        throw createException(401, "Unable to probeFfmpeg video");
+    } else {
+        _return = *videoInfo;
+    }
+}
+
+bool RemoteTranscoderServer::StreamUrl(const StreamUrlType &input) {
+    INFO("StreamUrl {}, stream will be sent to {}:{}", input.url, input.responseIp, input.responsePort);
+
+    std::string streamId = input.responseIp + "_" + input.responsePort;
+
+    // call of probe before StreamUrl is a must
+    auto stream = handler[streamId];
+
+    if (stream == nullptr) {
+        ERROR("Probe has not been called before StreamUrl. Aborting...");
+        throw createException(401, "Probe has not been called before StreamUrl. Aborting...");
+    }
+
+    DEBUG("Start video streaming...");
+    stream->streamVideo(input.url, input.mpdStart, input.cookies, input.referer, input.userAgent);
+
+    return true;
+}
+
+bool RemoteTranscoderServer::Pause(const PauseType &input) {
+    INFO("Pause streamId {}", input.streamId);
+
+    if (handler[input.streamId] != nullptr) {
+        handler[input.streamId]->pauseVideo();
+    }
+
+    return true;
+}
+
+bool RemoteTranscoderServer::SeekTo(const SeekToType &input) {
+    INFO("SeekTo streamId {}, to {}\n", input.streamId, input.seekTo);
+
+    // search existing seekToRequests
+    auto it = seekToVec.begin();
+    for (; it != seekToVec.end();) {
+        if (it->streamId == input.streamId) {
+            it->seekTo = input.seekTo;
+            it->lastSeek = std::chrono::high_resolution_clock::now();
+            break;
+        }
+        ++it;
+    }
+
+    if (it == seekToVec.end()) {
+        // create new entry
+        SeekToRequests s;
+        s.lastSeek = std::chrono::high_resolution_clock::now();
+        s.seekTo = input.seekTo;
+        s.streamId = input.streamId;
+
+        TRACE("Add: {}", s.lastSeek.time_since_epoch().count());
+
+        seekToVec.emplace_back(s);
+    }
+
+    return true;
+}
+
+bool RemoteTranscoderServer::Resume(const ResumeType &input) {
+    DEBUG("Resume: StreamId: {}, Position: {}", input.streamId, input.position);
+
+    if (handler[input.streamId] != nullptr) {
+        handler[input.streamId]->resumeVideo(input.position);
+    }
+
+    return true;
+}
+
+bool RemoteTranscoderServer::Stop(const StopType &input) {
+    INFO("Stop streamId {}, reason {}", input.streamId, input.reason);
+
+    if (handler[input.streamId] != nullptr) {
+        handler[input.streamId]->stopVideo();
+        delete handler[input.streamId];
+        handler.erase(input.streamId);
+    }
+
+    return true;
+}
+
+void RemoteTranscoderServer::AudioInfo(std::string &_return, const AudioInfoType &input) {
+    DEBUG("AudioInfo: StreamId: {}", input.streamId);
+
+    if (handler[input.streamId] != nullptr) {
+        _return = handler[input.streamId]->getAudioInfo();
+    } else {
+        throw createException(401, "Unknown streamId");
+    }
+}
+
+void RemoteTranscoderServer::GetVideo(std::string &_return, const VideoType &input) {
+    DEBUG("GetVideo: filename: {} with size {}", input.filename, transparentVideos[input.filename].length());
+
+    if (!transparentVideos[input.filename].empty()) {
+        _return = transparentVideos[input.filename];
+    } else {
+        throw createException(401, "Unknown video filename");
+    }
+}
+
+RemoteTranscoderIf *RemoteTranscoderCloneFactory::getHandler(const TConnectionInfo &connInfo) {
+    std::shared_ptr<TSocket> sock = std::dynamic_pointer_cast<TSocket>(connInfo.transport);
+
+    /*
+    std::cout << "Incoming connection\n";
+    std::cout << "\tSocketInfo: "  << sock->getSocketInfo() << "\n";
+    std::cout << "\tPeerHost: "    << sock->getPeerHost() << "\n";
+    std::cout << "\tPeerAddress: " << sock->getPeerAddress() << "\n";
+    std::cout << "\tPeerPort: "    << sock->getPeerPort() << "\n";
+    */
+
+    return new RemoteTranscoderServer();
+}
+
+void RemoteTranscoderCloneFactory::releaseHandler(CommonServiceIf *handler) {
+    delete handler;
+}
 
 void performSeekTo() {
     while (!stopSeekToThread) {
@@ -87,246 +247,22 @@ inline bool startsWith(const std::string& str, const std::string& prefix) {
     return str.size() >= prefix.size() && 0 == str.compare(0, prefix.size(), prefix);
 }
 
-void startHttpServer(std::string tIp, int tPort, std::string movie_path, std::string transparentMovie, bool bindAll) {
+void startServer() {
+    const int workerCount = 4;
+    std::shared_ptr<ThreadManager> threadManager = ThreadManager::newSimpleThreadManager(workerCount);
+    threadManager->threadFactory(std::make_shared<ThreadFactory>());
+    threadManager->start();
 
-    httplib::Headers headers;
-    headers.emplace("Cache-Control", "no-cache");
+    std::string listenIp = bindAll ? "0.0.0.0" : transcoderIp;
 
-    transcodeServer.Post("/Probe", [movie_path, transparentMovie](const httplib::Request &req, httplib::Response &res) {
-        std::lock_guard<std::mutex> guard(httpMutex);
+    thriftServer = new TThreadPoolServer(
+            std::make_shared<RemoteTranscoderProcessorFactory>(std::make_shared<RemoteTranscoderCloneFactory>()),
+            std::make_shared<TServerSocket>(listenIp, transcoderPort),
+            std::make_shared<TBufferedTransportFactory>(),
+            std::make_shared<TBinaryProtocolFactory>(),
+            threadManager);
 
-        auto url = req.get_param_value("url");
-        auto cookies = req.get_param_value("cookies");
-        auto referer = req.get_param_value("referer");
-        auto userAgent = req.get_param_value("userAgent");
-        auto responseIp = req.get_param_value("responseIp");
-        auto responsePort = req.get_param_value("responsePort");
-        auto vdrIp = req.get_param_value("vdrIp");
-        auto vdrPort = req.get_param_value("vdrPort");
-        auto postfix = req.get_param_value("postfix");
-
-        // ------ TEST
-        // url = "";
-        // ------ TEST
-
-        if (url.empty() || responseIp.empty() || responsePort.empty() || vdrIp.empty() || vdrPort.empty()) {
-            res.status = 404;
-        } else {
-            INFO("Probe {}", url);
-
-            std::string streamId = responseIp + "_" + responsePort;
-
-            if (handler[streamId] != nullptr) {
-                handler[streamId]->stopVideo();
-            }
-
-            if (clients[streamId] == nullptr) {
-                clients[streamId] = new BrowserClient(responseIp, std::stoi(responsePort));
-            }
-
-            delete handler[streamId];
-            handler.erase(streamId);
-
-            auto stream = new StreamHandler(responseIp, std::stoi(responsePort), vdrIp, std::stoi(vdrPort), transcodeConfig, clients[streamId], movie_path, transparentMovie);
-            stream->setKodi(enableKodi, kodiPath);
-            handler[streamId] = stream;
-
-            DEBUG("Probe video...");
-            auto videoInfo = stream->probeVideo(url, "0", cookies, referer, userAgent, postfix);
-
-            if (videoInfo == nullptr) {
-                res.status = 500;
-                res.set_content("Unable to probeFfmpeg video", "text/plain");
-            } else {
-                res.status = 200;
-                res.set_content(*videoInfo, "text/plain");
-            }
-        }
-    });
-
-    transcodeServer.Post("/StreamUrl", [](const httplib::Request &req, httplib::Response &res) {
-        std::lock_guard<std::mutex> guard(httpMutex);
-
-        auto url = req.get_param_value("url");
-        auto cookies = req.get_param_value("cookies");
-        auto referer = req.get_param_value("referer");
-        auto userAgent = req.get_param_value("userAgent");
-        auto responseIp = req.get_param_value("responseIp");
-        auto responsePort = req.get_param_value("responsePort");
-        auto vdrIp = req.get_param_value("vdrIp");
-        auto vdrPort = req.get_param_value("vdrPort");
-        auto mpdStart = req.get_param_value("mpdStart");
-
-        // ----------------- TEST
-        // url = "";
-        // ----------------- TEST
-
-        if (url.empty() || responseIp.empty() || responsePort.empty()) {
-            res.status = 404;
-        } else {
-            INFO("StreamUrl {}, stream will be sent to {}:{}", url, responseIp, responsePort);
-
-            std::string streamId = responseIp + "_" + responsePort;
-
-            // call of probe before StreamUrl is a must
-            auto stream = handler[streamId];
-
-            if (stream == nullptr) {
-                ERROR("Probe has not been called before StreamUrl. Aborting...");
-                res.status = 500;
-                res.set_content("Probe has not been called before StreamUrl. Aborting...", "text/plain");
-                return;
-            }
-
-            DEBUG("Start video streaming...");
-            stream->streamVideo(url, mpdStart, cookies, referer, userAgent);
-
-            res.status = 200;
-            res.set_content("ok", "text/plain");
-        }
-    });
-
-    transcodeServer.Post("/Pause", [](const httplib::Request &req, httplib::Response &res) {
-        std::lock_guard<std::mutex> guard(httpMutex);
-
-        auto streamId = req.get_param_value("streamId");
-
-        if (streamId.empty()) {
-            res.status = 404;
-        } else {
-            INFO("Pause streamId {}", streamId);
-
-            if (handler[streamId] != nullptr) {
-                handler[streamId]->pauseVideo();
-            }
-
-            res.status = 200;
-            res.set_content("ok", "text/plain");
-        }
-    });
-
-    transcodeServer.Post("/SeekTo", [](const httplib::Request &req, httplib::Response &res) {
-        std::lock_guard<std::mutex> guard(httpMutex);
-
-        auto streamId = req.get_param_value("streamId");
-        auto seekTo = req.get_param_value("seekTo");
-
-        if (streamId.empty() || seekTo.empty()) {
-            res.status = 404;
-        } else {
-            INFO("SeekTo streamId {}, to {}\n", streamId, seekTo);
-
-            // search existing seekToRequests
-            std::vector<SeekToRequests>::iterator it = seekToVec.begin();
-            for (; it != seekToVec.end();) {
-                if (it->streamId == streamId) {
-                    it->seekTo = seekTo;
-                    it->lastSeek = std::chrono::high_resolution_clock::now();
-
-                    printf("Update: %ld\n", it->lastSeek.time_since_epoch().count());
-                    break;
-                }
-                ++it;
-            }
-
-            if (it == seekToVec.end()) {
-                // create new entry
-                SeekToRequests s;
-                s.lastSeek = std::chrono::high_resolution_clock::now();
-                s.seekTo = seekTo;
-                s.streamId = streamId;
-
-                TRACE("Add: {}", s.lastSeek.time_since_epoch().count());
-
-                seekToVec.emplace_back(s);
-            }
-
-            // handler[streamId]->seekTo(seekTo);
-
-            res.status = 200;
-            res.set_content("ok", "text/plain");
-        }
-    });
-
-    transcodeServer.Post("/Resume", [](const httplib::Request &req, httplib::Response &res) {
-        std::lock_guard<std::mutex> guard(httpMutex);
-
-        auto streamId = req.get_param_value("streamId");
-        auto position = req.get_param_value("position");
-
-        DEBUG("Resume: StreamId: {}, Position: {}", streamId, position);
-
-        if (streamId.empty()) {
-            res.status = 404;
-        } else {
-            if (handler[streamId] != nullptr) {
-                handler[streamId]->resumeVideo(position);
-            }
-
-            res.status = 200;
-            res.set_content("ok", "text/plain");
-        }
-    });
-
-    transcodeServer.Post("/Stop", [](const httplib::Request &req, httplib::Response &res) {
-        std::lock_guard<std::mutex> guard(httpMutex);
-
-        auto streamId = req.get_param_value("streamId");
-        auto reason = req.get_param_value("reason");
-
-        if (streamId.empty()) {
-            res.status = 404;
-        } else {
-            INFO("Stop streamId {}, reason {}", streamId, reason);
-
-            if (handler[streamId] != nullptr) {
-                handler[streamId]->stopVideo();
-            }
-
-            delete handler[streamId];
-            handler.erase(streamId);
-
-            res.status = 200;
-            res.set_content("ok", "text/plain");
-        }
-    });
-
-    transcodeServer.Post("/AudioInfo", [](const httplib::Request &req, httplib::Response &res) {
-        std::lock_guard<std::mutex> guard(httpMutex);
-
-        auto streamId = req.get_param_value("streamId");
-
-        DEBUG("AudioInfo: StreamId: {}", streamId);
-
-        if (streamId.empty()) {
-            res.status = 404;
-        } else {
-            if (handler[streamId] != nullptr) {
-                res.status = 200;
-                res.set_content(handler[streamId]->getAudioInfo(), "application/json");
-            } else {
-                res.status = 404;
-            }
-        }
-    });
-
-    transcodeServer.Get(R"(/movie/(.*))", [](const httplib::Request &req, httplib::Response &res) {
-        std::lock_guard<std::mutex> guard(httpMutex);
-
-        auto name = req.matches[1];
-
-        res.status = 206;
-        res.set_content(transparentVideos[name.str()], "video/webm");
-    });
-
-    transcodeServer.set_keep_alive_max_count(50);
-    transcodeServer.set_keep_alive_timeout(5);
-
-    std::string listenIp = bindAll ? "0.0.0.0" : tIp;
-    if (!transcodeServer.listen(listenIp, tPort)) {
-        CRITICAL("Call of listen failed: ip {}, port {}, Reason: {}", listenIp, tPort, strerror(errno));
-        exit(1);
-    }
+    thriftServer->serve();
 }
 
 bool readConfiguration(const char* configFile) {
@@ -376,13 +312,19 @@ bool readCodecFile(const char* codecFile) {
     return true;
 }
 
+void signalHandler ( int signum ) {
+    stopSeekToThread = true;
+    thriftServer->stop();
+}
+
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         std::cerr << "Usage: " << argv[0] << " -c <config_file> -t <transcode_file> -m <movie_path>" << std::endl;
         return -1;
     }
 
-    std::string movie_path = "./movie"; // default value
+    signal(SIGINT, signalHandler) ;
+    signal(SIGTERM, signalHandler) ;
 
     static struct option long_options[] = {
             { "config",      required_argument, nullptr, 'c' },
@@ -397,7 +339,7 @@ int main(int argc, char* argv[]) {
     };
 
     int c, option_index = 0, loglevel = 1;
-    bool bindAll = false;
+    bindAll = false;
 
     seekPause = 500;
     while ((c = getopt_long(argc, argv, "c:t:m:l:s:bak:", long_options, &option_index)) != -1) {
@@ -454,10 +396,10 @@ int main(int argc, char* argv[]) {
     }
 
     // read whole transparent file into memory
-    std::string transparentMovie = readFile(movie_path + "/transparent-full.webm");
+    transparentMovie = readFile(movie_path + "/transparent-full.webm");
 
     // check if the mandatory transparent video exists
-    if (transparentMovie.length() == 0) {
+    if (transparentMovie.empty()) {
         ERROR("Video not found: {}/{}", movie_path, "transparent-full.webm");
         ERROR("Please check the configuration/installation. Abort...");
         exit(1);
@@ -471,33 +413,14 @@ int main(int argc, char* argv[]) {
     }
 
     // start server
-    std::thread t1(startHttpServer, transcoderIp, transcoderPort, movie_path, transparentMovie, bindAll);
+    std::thread t1(startServer);
 
     // start seekTo handler
     std::thread seekToThread = std::thread(performSeekTo);
-
-    // stop handler if requested
-    while (true) {
-        for (auto it = handler.cbegin(); it != handler.cend(); ) {
-            if (it->second) {
-                if (it->second->stopHandler()) {
-                    StreamHandler* h = it->second;
-                    handler.erase(it++);
-                    h->stopVideo();
-                    delete h;
-                } else {
-                    ++it;
-                }
-            }
-        }
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    }
-
-    stopSeekToThread = true;
 
     t1.join();
     seekToThread.join();
 
     return 0;
 }
+

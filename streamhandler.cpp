@@ -36,7 +36,7 @@ std::vector<std::string> split(std::string s, std::string delimiter) {
     return res;
 }
 
-StreamHandler::StreamHandler(std::string browserIp, int browserPort, std::string vdrIp, int vdrPort, TranscodeConfig& tc, BrowserClient *client, std::string movie_path, const std::string& tmovie) : browserIp(browserIp), browserPort(browserPort), browserClient(client), transcodeConfig(tc), movie_path(movie_path), transparent_movie(tmovie) {
+StreamHandler::StreamHandler(std::string browserIp, int browserPort, std::string vdrIp, int vdrPort, TranscodeConfig& tc, std::string movie_path, const std::string& tmovie) : browserIp(browserIp), browserPort(browserPort), transcodeConfig(tc), movie_path(movie_path), transparent_movie(tmovie) {
     streamHandler = nullptr;
     streamError = false;
     stopRequest = false;
@@ -44,6 +44,7 @@ StreamHandler::StreamHandler(std::string browserIp, int browserPort, std::string
     enableKodi = false;
     kodiPath = std::string();
     vdrClient = new VdrClient(vdrIp, vdrPort);
+    browserClient = new BrowserClient(browserIp, browserPort);
 }
 
 StreamHandler::~StreamHandler() {
@@ -52,6 +53,7 @@ StreamHandler::~StreamHandler() {
     stopVideo();
     remove((movie_path + "/" + transparentVideoFile).c_str());
     delete vdrClient;
+    delete browserClient;
 }
 
 void StreamHandler::setKodi(bool enable, std::string path) {
@@ -341,14 +343,15 @@ bool StreamHandler::streamVideo(std::string url, std::string position, std::stri
             if (hasStreamError()) {
                 browserClient->StreamError("Encrypted Stream");
             } else {
-                if (!browserClient->Heartbeat()) {
+                if (!browserClient->ping()) {
                     // connection problems? abort transcoding
                     ERROR("Unable to connect to browser. Abort transcoding...");
                     // stopVideo();
                     stopRequest = true;
                 }
 
-                if (!vdrClient->ProcessTSPacket(std::string(bytes, n))) {
+                std::string packets = std::string(bytes, n);
+                if (!vdrClient->ProcessTSPacket(packets)) {
                     // connection problems? abort transcoding
                     // This can be happen by intention, e.g. if VDR stops the video player
                     DEBUG("Unable to connect to vdr. Abort transcoding...");
@@ -695,7 +698,8 @@ bool StreamHandler::createVideoWithLength(std::string seconds, const std::string
     }
 
     std::vector<std::string> callStr {
-        "ffmpeg", "-hide_banner" , "-y", "-i", "pipe:0", "-t", seconds, "-codec", "copy", "-f", "webm", "pipe:1"
+        // "ffmpeg", "-hide_banner" , "-y", "-i", "pipe:0", "-t", seconds, "-codec", "copy", "-f", "webm", "pipe:1"
+        "ffmpeg", "-hide_banner" , "-y", "-i", movie_path + "/transparent-full.webm", "-t", seconds, "-codec", "copy", "-f", "webm", "pipe:1"
     };
 
     TinyProcessLib::Process process(callStr, "",
@@ -709,7 +713,7 @@ bool StreamHandler::createVideoWithLength(std::string seconds, const std::string
                                     true
     );
 
-    process.write(transparent_movie);
+    // process.write(transparent_movie);
 
     int exit = process.get_exit_status();
 

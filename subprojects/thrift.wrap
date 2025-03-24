@@ -1,0 +1,8 @@
+[wrap-file]
+directory = thrift-0.21.0
+source_url = https://github.com/apache/thrift/archive/refs/tags/v0.21.0.zip
+source_filename = v0.21.0.zip
+source_hash = 774acd19f8610f5ab6c699b453fa78ffeef2343acdb946e98845b5946539823f
+
+[provide]
+thrift = thrift_dep

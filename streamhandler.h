@@ -3,8 +3,8 @@
 #include <string>
 #include <thread>
 #include "process.hpp"
-#include "browserclient.h"
-#include "vdrclient.h"
+#include "BrowserClient.h"
+#include "VdrClient.h"
 #include "transcodeconfig.h"
 #include "json.hpp"
 #include "m3u8handler.h"
@@ -26,7 +26,7 @@ private:
     int capabilities;
 
 public:
-    StreamHandler(std::string browserIp, int browserPort, std::string vdrIp, int vdrPort, TranscodeConfig& tc, BrowserClient* client, std::string movie_path, const std::string& transparent_movie);
+    StreamHandler(std::string browserIp, int browserPort, std::string vdrIp, int vdrPort, TranscodeConfig& tc, std::string movie_path, const std::string& transparent_movie);
     ~StreamHandler();
 
     void setKodi(bool enable, std::string path);

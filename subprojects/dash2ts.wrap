@@ -4,7 +4,6 @@ source_url = https://github.com/jojo61/dash2ts/archive/4ef8bf173f7ea355bcab7f7d4
 source_filename = 4ef8bf173f7ea355bcab7f7d42f436541d4f795a.zip
 source_hash = cb11fd638772497dba12b03ec7d6ed87146adbb1bc1e1fa458465cc7794dcfdb
 patch_directory = dash2ts
-#diff_files = dash2ts/remove_sockets.patch
 
 [provide]
 dash2ts = dash2ts_dep
