@@ -512,7 +512,7 @@ std::shared_ptr<std::string> StreamHandler::probeFfmpeg(const std::string& url) 
 
                         std::string cn = el3["codec_name"];
                         std::string cnt = el3["codec_tag_string"];
-                        *videoResult = cn + "/" + cnt + "/" + sample_rate + "/" + bit_rate;
+                        *videoResult = cn + "/" + cnt;
                     }
                 }
             }
@@ -546,7 +546,7 @@ std::shared_ptr<std::string> StreamHandler::probeFfmpeg(const std::string& url) 
 
                     std::string cn = el["codec_name"];
                     std::string cnt = el["codec_tag_string"];
-                    *videoResult = cn + "/" + cnt + "/" + sample_rate + "/" + bit_rate;
+                    *videoResult = cn + "/" + cnt;
                 }
             } else if (el.contains("codec_type") && el["codec_type"] == "audio") {
                 // check if the stream has a sample rate
