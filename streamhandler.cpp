@@ -620,16 +620,22 @@ std::shared_ptr<std::string> StreamHandler::probeDash2ts(const std::string& url)
     std::string dash2ts_bin = exepath.substr(0, exepath.find_last_of('/')) + "/r_dash2ts";
 
     // get stream infos
-    DEBUG("Starte r_dash2ts");
-    std::vector<std::string> callStr{
+    std::vector<std::string> callStr {
             dash2ts_bin,
             "-u", url,
             "-a", userAgent,
-            "-c", cookies,
             "-r", referer,
             "-k", kodiPath,
             "-p"
     };
+
+    if (!cookies.empty()) {
+        callStr.emplace_back("-c");
+        callStr.emplace_back(cookies);
+    }
+
+    DEBUG("Starte r_dash2ts");
+    DEBUG("{} -u \"{}\" -a \"{}\" -c \"{}\" -r \"{}\" -k \"{}\" -p", dash2ts_bin, url, userAgent, cookies, referer, kodiPath);
 
     TinyProcessLib::Process process(callStr, "", [output](const char *bytes, size_t n) {
         *output += std::string(bytes, n);

@@ -97,7 +97,7 @@ int main(int argc, char *argv[]) {
         path_to_kodi = "/storage/.kodi";
     }
 
-    if (url.empty() || user_agent.empty() || cookies.empty() || referer.empty()) {
+    if (url.empty() || user_agent.empty() || referer.empty()) {
         usage();
         exit(EXIT_FAILURE);
     }
@@ -118,7 +118,11 @@ int main(int argc, char *argv[]) {
 
     INFO("Found inputstream.adaptive Library, version {}", api_version);
 
-    std::string httpHeader = "Referer=" + referer + "&User-Agent=" + user_agent + "&cookie=" + urlEncode(cookies);
+    std::string httpHeader = "Referer=" + referer + "&User-Agent=" + user_agent;
+
+    if (!cookies.empty()) {
+        httpHeader += "&cookie=" + urlEncode(cookies);
+    }
 
     // kodi 22+
     handler->AddProp("inputstream.adaptive.common_headers", httpHeader.c_str());
