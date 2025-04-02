@@ -11,6 +11,7 @@ struct ProcessOsdUpdateType {
     4: i32 y,
     5: i32 width,         // height and width of image
     6: i32 height
+    7: binary data        // the osd image
 }
 
 struct ProcessOsdUpdateQOIType {
@@ -56,5 +57,6 @@ service VdrPluginWeb extends common.CommonService {
     bool VideoSize(1: VideoSizeType input) throws (1:common.OperationFailed err),
     bool VideoFullscreen() throws (1:common.OperationFailed err),
     bool ResetVideo(1: ResetVideoType input) throws (1:common.OperationFailed err),
-    bool SelectAudioTrack(1: SelectAudioTrackType input) throws (1:common.OperationFailed err)
+    bool SelectAudioTrack(1: SelectAudioTrackType input) throws (1:common.OperationFailed err),
+    bool IsWebActive() throws (1:common.OperationFailed err)
 }
