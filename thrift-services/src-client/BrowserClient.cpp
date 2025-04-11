@@ -117,6 +117,10 @@ bool BrowserClient::StartApplication(const std::string& channelId, const std::st
         input.appUserAgent = appUserAgent;
         input.url = url;
 
+        if (!url.empty()) {
+            input.__isset.url = true;
+        }
+
         return client->StartApplication(input);
     });
 }
