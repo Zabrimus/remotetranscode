@@ -25,6 +25,7 @@ thrift_opts.add_cmake_defines({'WITH_AS3': 'OFF',
                                'WITH_OPENSSL': 'OFF',
                                'BUILD_SHARED_LIBS': 'OFF',
                                'BUILD_COMPILER': 'OFF',
+                               'CMAKE_INSTALL_PREFIX': '.',
                                'CMAKE_POSITION_INDEPENDENT_CODE': 'ON' })
 
 thrift_proj = cmake.subproject('thrift', options: thrift_opts)
