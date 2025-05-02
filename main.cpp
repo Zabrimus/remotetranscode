@@ -266,6 +266,14 @@ void startServer() {
 }
 
 bool readConfiguration(const char* configFile) {
+    // check at first if configFile really exists
+    struct stat path_stat;
+    stat(configFile, &path_stat);
+    if (!S_ISREG(path_stat.st_mode)) {
+        ERROR("[vdrweb] Unable to read config file: %s. Reason: %s", configFile, strerror(errno));
+        return false;
+    }
+
     mINI::INIFile file(configFile);
     mINI::INIStructure ini;
     auto result = file.read(ini);
