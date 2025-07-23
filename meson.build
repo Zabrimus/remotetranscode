@@ -56,6 +56,11 @@ dash2ts_proj = subproject('dash2ts')
 dash2ts_dep = dash2ts_proj.get_variable('dash2ts_dep')
 
 incdir = include_directories(['thrift-services/src-gen', 'thrift-services/src-client'])
+trans_compile_args = []
+
+if get_option('debug_thrift')
+    trans_compile_args += '-DDEBUG_THRIFTCLIENT'
+endif
 
 remotrans = executable('remotrans', 'main.cpp', 'logger.cpp', 'streamhandler.cpp', 'transcodeconfig.cpp',
                         'm3u8handler.cpp', 'thrift-services/src-client/BrowserClient.cpp', 'thrift-services/src-client/VdrClient.cpp',
@@ -64,16 +69,19 @@ remotrans = executable('remotrans', 'main.cpp', 'logger.cpp', 'streamhandler.cpp
 	                    'thrift-services/src-gen/VdrPluginWeb.cpp', 'thrift-services/src-gen/pluginweb_types.cpp',
                         'thrift-services/src-gen/RemoteTranscoder.cpp', 'thrift-services/src-gen/remotetranscoder_types.cpp',
                         include_directories : incdir,
+                        cpp_args : trans_compile_args,
                         install : true,
                         install_dir : meson.current_build_dir() + '/Release',
                         dependencies: [mini_dep, spdlog_dep, tiny_process_library_dep, openssl_dep, thrift_dep])
 
 r_dash2ts = executable('r_dash2ts', 'r_dash2ts.cpp', 'logger.cpp',
+                       cpp_args : trans_compile_args,
                        install : true,
                        install_dir : meson.current_build_dir() + '/Release',
                        dependencies: [spdlog_dep, dash2ts_dep])
 
 r_dash2tsd = executable('r_dash2ts_debug', 'r_dash2ts_debug.cpp', 'logger.cpp',
+                       cpp_args : trans_compile_args,
                        install : true,
                        install_dir : meson.current_build_dir() + '/Release',
                        dependencies: [spdlog_dep, dash2ts_dep])

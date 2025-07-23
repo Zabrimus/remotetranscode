@@ -1,0 +1,1 @@
+option('debug_thrift', type: 'boolean', value: false, description: 'Enable more debug logging')

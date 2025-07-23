@@ -14,8 +14,6 @@ using namespace apache::thrift::protocol;
 using namespace apache::thrift::transport;
 using namespace ::cefbrowser;
 
-extern bool browserClientLogThriftMessages;
-
 class BrowserClient {
 public:
     BrowserClient(std::string vdrIp, int vdrPort);
@@ -39,6 +37,7 @@ private:
 
 private:
     CefBrowserClient *client;
+    std::shared_ptr<TSocket> socket;
     std::shared_ptr<TTransport> transport;
     std::recursive_mutex browser_send_mutex;
 };
