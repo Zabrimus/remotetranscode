@@ -33,6 +33,7 @@ bool enableKodi = false;
 
 std::string movie_path = "./movie"; // default value
 std::string transparentMovie;
+std::string fakeMovie;
 bool bindAll = false;
 
 struct SeekToRequests {
@@ -177,7 +178,9 @@ void RemoteTranscoderServer::AudioInfo(std::string &_return, const AudioInfoType
 void RemoteTranscoderServer::GetVideo(std::string &_return, const VideoType &input) {
     DEBUG("GetVideo: filename: {} with size {}", input.filename, transparentVideos[input.filename].length());
 
-    if (!transparentVideos[input.filename].empty()) {
+    if (input.filename == "fake-video.webm") {
+        _return = fakeMovie;
+    } else if (!transparentVideos[input.filename].empty()) {
         _return = transparentVideos[input.filename];
     } else {
         throw createException(401, "Unknown video filename");
@@ -409,6 +412,16 @@ int main(int argc, char* argv[]) {
     // check if the mandatory transparent video exists
     if (transparentMovie.empty()) {
         ERROR("Video not found: {}/{}", movie_path, "transparent-full.webm");
+        ERROR("Please check the configuration/installation. Abort...");
+        exit(1);
+    }
+
+    // read whole fake movie into memory
+    fakeMovie = readFile(movie_path + "/fake-movie.webm");
+
+    // check if the mandatory transparent video exists
+    if (fakeMovie.empty()) {
+        ERROR("Video not found: {}/{}", movie_path, "fake-movie.webm");
         ERROR("Please check the configuration/installation. Abort...");
         exit(1);
     }

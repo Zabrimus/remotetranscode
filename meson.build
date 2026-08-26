@@ -13,23 +13,30 @@ cpp = meson.get_compiler('cpp')
 #
 openssl_dep = dependency('openssl')
 
+#
 # thrift
-thrift_opts = cmake.subproject_options()
-thrift_opts.add_cmake_defines({'WITH_AS3': 'OFF',
-                               'WITH_QT5': 'OFF',
-                               'BUILD_JAVA': 'OFF',
-                               'BUILD_JAVASCRIPT': 'OFF',
-                               'BUILD_PYTHON': 'OFF',
-                               'BUILD_TESTING': 'OFF',
-                               'WITH_C_GLIB': 'OFF',
-                               'WITH_OPENSSL': 'OFF',
-                               'BUILD_SHARED_LIBS': 'OFF',
-                               'BUILD_COMPILER': 'OFF',
-                               'CMAKE_INSTALL_PREFIX': '.',
-                               'CMAKE_POSITION_INDEPENDENT_CODE': 'ON' })
+#
+if get_option('vdrsternelec')
+    thrift_dep = dependency('thrift')
+else
+    thrift_opts = cmake.subproject_options()
+    thrift_opts.add_cmake_defines({'WITH_AS3': 'OFF',
+                                   'WITH_QT5': 'OFF',
+                                   'BUILD_JAVA': 'OFF',
+                                   'BUILD_JAVASCRIPT': 'OFF',
+                                   'BUILD_PYTHON': 'OFF',
+                                   'BUILD_TESTING': 'OFF',
+                                   'WITH_C_GLIB': 'OFF',
+                                   'WITH_OPENSSL': 'OFF',
+                                   'BUILD_SHARED_LIBS': 'OFF',
+                                   'BUILD_COMPILER': 'OFF',
+                                   'CMAKE_INSTALL_PREFIX': '.',
+                                   'CMAKE_POSITION_INDEPENDENT_CODE': 'ON',
+                                   'CMAKE_CXX_STANDARD': '11'})
 
-thrift_proj = cmake.subproject('thrift', options: thrift_opts)
-thrift_dep = thrift_proj.get_variable('thrift_dep')
+    thrift_proj = cmake.subproject('thrift', options: thrift_opts)
+    thrift_dep = thrift_proj.get_variable('thrift_dep')
+endif
 
 #
 # spdlog
