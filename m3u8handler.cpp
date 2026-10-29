@@ -25,8 +25,15 @@ m3u_stream M3u8Handler::parseM3u() {
 
     auto uri = uri::parse_uri(webUri);
 
-    httplib::Client cli(uri.scheme + "://" + uri.authority.host + (uri.authority.port > 0 ? std::to_string(uri.authority.port) : ""));
-    auto res = cli.Get(uri.path);
+    httplib::Client cli(uri.scheme + "://" + uri.authority.host + (uri.authority.port > 0 ? ":" + std::to_string(uri.authority.port) : ""));
+
+    // keep the query, playlists are often protected by tokens in the query
+    std::string path = uri.path.empty() ? "/" : uri.path;
+    if (!uri.query_string.empty()) {
+        path += "?" + uri.query_string;
+    }
+
+    auto res = cli.Get(path);
 
     m3u_stream result;
     result.width = result.height = 0;
