@@ -679,8 +679,8 @@ std::shared_ptr<std::string> StreamHandler::probeDash2ts(const std::string& url)
     int exit = process.get_exit_status();
 
     DEBUG("Probe exit code: {}", exit);
-    if (exit == 1) {
-        ERROR("Probe of '{}' failed.", url);
+    if (exit != 0) {
+        ERROR("Probe of '{}' failed with exit code {}.", url, exit);
         return nullptr;
     }
 
@@ -693,15 +693,19 @@ std::shared_ptr<std::string> StreamHandler::probeDash2ts(const std::string& url)
     DEBUG("Call r_dash2ts: {}", paramOut.str());
     DEBUG("OUTPUT( {} ) {}", exit, *output);
 
-    int tdur;
-    int ttime;
-    int tcap;
-    long pos;
-    long length;
-    int realTime;
+    int tdur = 0;
+    int ttime = 0;
+    int tcap = 0;
+    long pos = 0;
+    long length = 0;
+    int realTime = 0;
 
     auto idx = output->find("dash2ts result:");
-    sscanf(output->substr(idx).c_str(), "dash2ts result:%d:%d:%d:%ld:%ld:%d", &tdur, &ttime, &tcap, &pos, &length, &realTime);
+    if (idx == std::string::npos ||
+        sscanf(output->substr(idx).c_str(), "dash2ts result:%d:%d:%d:%ld:%ld:%d", &tdur, &ttime, &tcap, &pos, &length, &realTime) != 6) {
+        ERROR("Probe of '{}' returned no usable result.", url);
+        return nullptr;
+    }
 
     duration = std::to_string(tdur / 1000 + 1);
     capabilities = tcap;
