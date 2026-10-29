@@ -761,27 +761,37 @@ bool StreamHandler::createVideoWithLength(std::string seconds, const std::string
 
 std::string StreamHandler::getAudioInfo() {
     json result;
+    result["stream"] = json::array();
 
-    // add audio streams
+    // add audio streams, the index counts audio streams only
     int audioIndex = 0;
     for (auto& v : bstreams) {
-        if (v["codec_type"] == "audio") {
-            std::string language;
-            std::string comment;
+        if (!v.is_object() || v.value("codec_type", "") != "audio") {
+            continue;
+        }
 
-            if (v.contains("tags")) {
-                language = v["tags"]["language"];
-                comment = v["tags"]["comment"];
+        std::string language;
+        std::string comment;
 
-                json lang;
-                lang["index"] = audioIndex;
-                lang["language"] = language;
-                lang["comment"] = comment;
-
-                result["stream"].push_back(lang);
+        // tags are optional and may contain only some of the values
+        if (v.contains("tags") && v["tags"].is_object()) {
+            const auto& tags = v["tags"];
+            if (tags.contains("language") && tags["language"].is_string()) {
+                language = tags["language"];
+            }
+            if (tags.contains("comment") && tags["comment"].is_string()) {
+                comment = tags["comment"];
+            } else if (tags.contains("handler_name") && tags["handler_name"].is_string()) {
+                comment = tags["handler_name"];
             }
         }
 
+        json lang;
+        lang["index"] = audioIndex;
+        lang["language"] = language;
+        lang["comment"] = comment;
+
+        result["stream"].push_back(lang);
         audioIndex++;
     }
 
