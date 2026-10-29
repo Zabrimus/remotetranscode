@@ -93,7 +93,10 @@ std::shared_ptr<std::string> StreamHandler::probeVideo(std::string url, std::str
         // the audio infos are filled once per probe, not on every (re)start of the stream
         bstreams = json::array();
         for (const auto& a : m3u.audio) {
-            json st = json::parse("{ \"codec_type\": \"audio\", \"tags\": { \"language\": \"" + a.language + "\", \"comment\": \"" + a.name + "\" }}");
+            json st;
+            st["codec_type"] = "audio";
+            st["tags"]["language"] = a.language;
+            st["tags"]["comment"] = a.name;
             bstreams.push_back(st);
         }
 
