@@ -152,8 +152,6 @@ std::vector<std::string> StreamHandler::prepareStreamCmd(std::string url, std::s
         callStr.emplace_back("copy");
         callStr.emplace_back("-c:a");
         callStr.emplace_back("copy");
-        callStr.emplace_back("-ar");
-        callStr.emplace_back("48000");
 
         // add video stream
         // Note: the stream specifier of -c refers to the output stream index,
@@ -185,11 +183,13 @@ std::vector<std::string> StreamHandler::prepareStreamCmd(std::string url, std::s
 
                 if (transcodeConfig.isCopyAudio(v["codec_name"], v["sample_rate"])) {
                     callStr.emplace_back("copy");
-                    callStr.emplace_back("-ar");
-                    callStr.emplace_back("48000");
                 } else {
                     auto audioParameter = transcodeConfig.getAudioTranscodeParameter();
                     callStr.insert(callStr.end(), audioParameter.begin(), audioParameter.end());
+
+                    // a sample rate can only be set if the audio is encoded
+                    callStr.emplace_back("-ar:" + std::to_string(outIndex));
+                    callStr.emplace_back("48000");
                 }
 
                 outIndex++;
