@@ -156,11 +156,14 @@ std::vector<std::string> StreamHandler::prepareStreamCmd(std::string url, std::s
         callStr.emplace_back("48000");
 
         // add video stream
+        // Note: the stream specifier of -c refers to the output stream index,
+        // which is the order of the -map options, not the input stream index.
+        int outIndex = 0;
         for (auto &v: bstreams) {
             if (v["codec_type"] == "video") {
                 callStr.emplace_back("-map");
                 callStr.emplace_back("0:" + std::to_string((int) v["index"]));
-                callStr.emplace_back("-c:" + std::to_string((int) v["index"]));
+                callStr.emplace_back("-c:" + std::to_string(outIndex));
 
                 if (transcodeConfig.isCopyVideo(v["codec_name"])) {
                     callStr.emplace_back("copy");
@@ -168,6 +171,8 @@ std::vector<std::string> StreamHandler::prepareStreamCmd(std::string url, std::s
                     auto videoParameter = transcodeConfig.getVideoTranscodeParameter();
                     callStr.insert(callStr.end(), videoParameter.begin(), videoParameter.end());
                 }
+
+                outIndex++;
             }
         }
 
@@ -176,7 +181,7 @@ std::vector<std::string> StreamHandler::prepareStreamCmd(std::string url, std::s
             if (v["codec_type"] == "audio") {
                 callStr.emplace_back("-map");
                 callStr.emplace_back("0:" + std::to_string((int) v["index"]));
-                callStr.emplace_back("-c:" + std::to_string((int) v["index"]));
+                callStr.emplace_back("-c:" + std::to_string(outIndex));
 
                 if (transcodeConfig.isCopyAudio(v["codec_name"], v["sample_rate"])) {
                     callStr.emplace_back("copy");
@@ -186,6 +191,8 @@ std::vector<std::string> StreamHandler::prepareStreamCmd(std::string url, std::s
                     auto audioParameter = transcodeConfig.getAudioTranscodeParameter();
                     callStr.insert(callStr.end(), audioParameter.begin(), audioParameter.end());
                 }
+
+                outIndex++;
             }
         }
     } else {
