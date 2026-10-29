@@ -478,8 +478,8 @@ std::shared_ptr<std::string> StreamHandler::probeFfmpeg(const std::string& url) 
     int exit = process.get_exit_status();
 
     DEBUG("Probe exit code: {}", exit);
-    if (exit == 1) {
-        ERROR("Probe of '{}' failed.", url);
+    if (exit != 0) {
+        ERROR("Probe of '{}' failed with exit code {}.", url, exit);
         return nullptr;
     }
 
@@ -494,7 +494,18 @@ std::shared_ptr<std::string> StreamHandler::probeFfmpeg(const std::string& url) 
 
     *videoResult = "no video";
 
-    json st = json::parse(*output);
+    json st;
+    try {
+        st = json::parse(*output);
+    } catch (json::exception &e) {
+        ERROR("Probe of '{}' returned no usable result: {}", url, e.what());
+        return nullptr;
+    }
+
+    if (!st.is_object() || !st.contains("streams")) {
+        ERROR("Probe of '{}' found no streams.", url);
+        return nullptr;
+    }
 
     ffmpegCopy = false;
     json bestProgram;
