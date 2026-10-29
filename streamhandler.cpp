@@ -291,6 +291,22 @@ std::vector<std::string> StreamHandler::prepareStreamM3uCmd(std::string url, std
             callStr.emplace_back(position);
         }
 
+        // the http options are input options, they apply to the next input only
+        if (!referer.empty()) {
+            callStr.emplace_back("-referer");
+            callStr.emplace_back(referer);
+        }
+
+        if (!userAgent.empty()) {
+            callStr.emplace_back("-user_agent");
+            callStr.emplace_back(userAgent);
+        }
+
+        if (!cookies.empty()) {
+            callStr.emplace_back("-headers");
+            callStr.emplace_back("Cookie: " + cookies);
+        }
+
         addNetworkOptions(callStr, a.uri);
         callStr.emplace_back("-i");
         callStr.emplace_back(a.uri);
