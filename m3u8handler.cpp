@@ -73,6 +73,11 @@ m3u_stream M3u8Handler::parseM3u() {
     std::string starterIgnore = "#EXTINF:";
 
     while (std::getline(stream, line)) {
+        // playlists with CRLF line endings
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+
         if (startsWith(line, starterStream)) {
             auto splitted = split(line.substr(starterStream.length()), ',');
 
@@ -85,6 +90,9 @@ m3u_stream M3u8Handler::parseM3u() {
                         maxW = w;
                         maxH = h;
                         std::getline(stream, m3uMax);
+                        if (!m3uMax.empty() && m3uMax.back() == '\r') {
+                            m3uMax.pop_back();
+                        }
 
                         if (!startsWith(m3uMax, "http://") && !startsWith(m3uMax, "https://")) {
                             // this is a relative URL -> construct absolute URL
