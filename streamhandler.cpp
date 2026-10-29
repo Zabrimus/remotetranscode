@@ -601,6 +601,9 @@ std::shared_ptr<std::string> StreamHandler::probeFfmpeg(const std::string& url) 
                         } else {
                             bestProgram.push_back(el);
                         }
+                    } else {
+                        // audio without any tags
+                        bestProgram.push_back(el);
                     }
                 }
             }
