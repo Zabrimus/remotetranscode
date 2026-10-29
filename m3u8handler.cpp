@@ -185,7 +185,8 @@ m3u_stream M3u8Handler::parseM3u() {
         } else if (startsWith(line, starterMedia)) {
             auto attr = parseAttributes(line.substr(starterMedia.length()));
 
-            if (attr["TYPE"] == "AUDIO") {
+            // an audio rendition without URI is contained in the variant stream itself
+            if (attr["TYPE"] == "AUDIO" && !attr["URI"].empty()) {
                 media m;
                 m.type = attr["TYPE"];
                 m.language = attr["LANGUAGE"];

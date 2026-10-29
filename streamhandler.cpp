@@ -284,6 +284,10 @@ std::vector<std::string> StreamHandler::prepareStreamM3uCmd(std::string url, std
         callStr.emplace_back("-map");
         callStr.emplace_back("0:v");
 
+        // audio contained in the variant itself (rendition without URI), if any
+        callStr.emplace_back("-map");
+        callStr.emplace_back("0:a?");
+
         int idx = 1;
         for (auto a: m3u.audio) {
             callStr.emplace_back("-map");
