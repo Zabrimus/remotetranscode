@@ -169,6 +169,10 @@ m3u_stream M3u8Handler::parseM3u() {
                 if (w > maxW) {
                     maxW = w;
                     maxH = h;
+
+                    // the audio group of the selected variant
+                    audioGroup = attr.count("AUDIO") ? attr["AUDIO"] : "";
+
                     std::getline(stream, m3uMax);
                     if (!m3uMax.empty() && m3uMax.back() == '\r') {
                         m3uMax.pop_back();
@@ -178,9 +182,6 @@ m3u_stream M3u8Handler::parseM3u() {
                 }
             }
 
-            if (attr.count("AUDIO")) {
-                audioGroup = attr["AUDIO"];
-            }
         } else if (startsWith(line, starterMedia)) {
             auto attr = parseAttributes(line.substr(starterMedia.length()));
 
