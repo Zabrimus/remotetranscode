@@ -262,9 +262,15 @@ std::vector<std::string> StreamHandler::prepareStreamM3uCmd(std::string url, std
     callStr.emplace_back("-i");
     callStr.emplace_back(m3u.url);
 
-    // add optional audio input
+    // add optional audio input. -ss is an input option and must be repeated
+    // for every input, otherwise the audio starts at 0 after a seek or resume.
     std::vector<std::string> audioMetadata;
     for (auto a : m3u.audio) {
+        if (!endsWith(url, ".mpd") && (url.find("hbbtv.zdf.de/zdfm3/dyn/mpd.php") == std::string::npos)) {
+            callStr.emplace_back("-ss");
+            callStr.emplace_back(position);
+        }
+
         callStr.emplace_back("-i");
         callStr.emplace_back(a.uri);
     }
