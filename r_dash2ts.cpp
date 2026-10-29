@@ -119,10 +119,11 @@ int main(int argc, char *argv[]) {
 
     INFO("Found inputstream.adaptive Library, version {}", api_version);
 
-    std::string httpHeader = "User-Agent=" + user_agent;
+    // the header values must be url encoded, a '&' in the referer would split the list
+    std::string httpHeader = "User-Agent=" + urlEncode(user_agent);
 
     if (!referer.empty()) {
-        httpHeader += "&Referer=" + referer;
+        httpHeader += "&Referer=" + urlEncode(referer);
     }
 
     if (!cookies.empty()) {
