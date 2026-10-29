@@ -2,6 +2,7 @@
 
 #include <string>
 #include <thread>
+#include <atomic>
 #include "process.hpp"
 #include "BrowserClient.h"
 #include "VdrClient.h"
@@ -17,7 +18,7 @@ class StreamHandler {
 private:
     std::string ffmpeg;
 
-    TinyProcessLib::Process *streamHandler;
+    std::atomic<TinyProcessLib::Process*> streamHandler;
     std::thread *readerThread;
 
     bool enableKodi;
@@ -36,6 +37,7 @@ public:
     bool pauseVideo();
     bool resumeVideo(std::string position);
     void stopVideo();
+    void terminateStream();
     bool seekTo(std::string pos);
 
     bool hasStreamError() { return streamError; };
@@ -49,8 +51,8 @@ private:
     std::string browserIp;
     int browserPort;
 
-    bool streamError;
-    bool stopRequest;
+    std::atomic<bool> streamError;
+    std::atomic<bool> stopRequest;
 
     std::string cookies;
     std::string referer;

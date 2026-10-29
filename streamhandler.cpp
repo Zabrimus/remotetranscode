@@ -323,6 +323,10 @@ bool StreamHandler::streamVideo(std::string url, std::string position, std::stri
     // never run two ffmpeg processes for the same stream
     stopVideo();
 
+    // a new stream starts without the errors of the previous one
+    stopRequest = false;
+    streamError = false;
+
     // create parameter list
     std::vector<std::string> callStr;
 
@@ -349,8 +353,9 @@ bool StreamHandler::streamVideo(std::string url, std::string position, std::stri
                 if (!browserClient->ping()) {
                     // connection problems? abort transcoding
                     ERROR("Unable to connect to browser. Abort transcoding...");
-                    // stopVideo();
                     stopRequest = true;
+                    terminateStream();
+                    return;
                 }
 
                 std::string packets = std::string(bytes, n);
@@ -359,6 +364,7 @@ bool StreamHandler::streamVideo(std::string url, std::string position, std::stri
                     // This can be happen by intention, e.g. if VDR stops the video player
                     DEBUG("Unable to connect to vdr. Abort transcoding...");
                     stopRequest = true;
+                    terminateStream();
                 }
             }
         },
@@ -398,12 +404,22 @@ bool StreamHandler::resumeVideo(std::string position) {
     return true;
 }
 
+void StreamHandler::terminateStream() {
+    // called from the reader thread: only signal ffmpeg, stopVideo() cleans up
+    TinyProcessLib::Process *p = streamHandler;
+    if (p != nullptr) {
+        p->kill();
+    }
+}
+
 void StreamHandler::stopVideo() {
-    if (streamHandler != nullptr) {
-        streamHandler->kill(true);
-        streamHandler->get_exit_status();
-        delete streamHandler;
+    // the reader thread may still access streamHandler until get_exit_status() returns
+    TinyProcessLib::Process *p = streamHandler.load();
+    if (p != nullptr) {
+        p->kill(true);
+        p->get_exit_status();
         streamHandler = nullptr;
+        delete p;
     }
 }
 
