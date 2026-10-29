@@ -320,6 +320,9 @@ bool StreamHandler::streamVideo(std::string url, std::string position, std::stri
 
     DEBUG("StreamVideo: {} -> {}", position, url);
 
+    // never run two ffmpeg processes for the same stream
+    stopVideo();
+
     // create parameter list
     std::vector<std::string> callStr;
 
