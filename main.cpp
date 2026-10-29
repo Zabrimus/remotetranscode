@@ -1,4 +1,6 @@
 #include <iostream>
+#include <algorithm>
+#include <mutex>
 #include <getopt.h>
 #include <string>
 #include <filesystem>
@@ -26,6 +28,42 @@ std::map<std::string, StreamHandler*> handler;
 
 std::mutex httpMutex;
 
+
+struct SeekToRequests {
+    std::string streamId;
+    std::string seekTo;
+    std::chrono::_V2::system_clock::time_point lastSeek;
+};
+
+std::vector<SeekToRequests> seekToVec;
+bool stopSeekToThread = false;
+
+// handler, seekToVec and transparentVideos are used by the thrift worker threads and the seek thread
+std::recursive_mutex handlerMutex;
+
+static StreamHandler* findHandler(const std::string& streamId) {
+    auto it = handler.find(streamId);
+    return it != handler.end() ? it->second : nullptr;
+}
+
+static void removeHandler(const std::string& streamId) {
+    auto it = handler.find(streamId);
+    if (it != handler.end()) {
+        StreamHandler *h = it->second;
+        handler.erase(it);
+
+        if (h != nullptr) {
+            h->stopVideo();
+            delete h;
+        }
+    }
+
+    // drop pending seek requests of this stream
+    seekToVec.erase(std::remove_if(seekToVec.begin(), seekToVec.end(),
+                                   [&](const SeekToRequests& s) { return s.streamId == streamId; }),
+                    seekToVec.end());
+}
+
 TranscodeConfig transcodeConfig;
 
 std::string kodiPath = "/storage/.kodi";
@@ -36,14 +74,6 @@ std::string transparentMovie;
 std::string fakeMovie;
 bool bindAll = false;
 
-struct SeekToRequests {
-    std::string streamId;
-    std::string seekTo;
-    std::chrono::_V2::system_clock::time_point lastSeek;
-};
-
-std::vector<SeekToRequests> seekToVec;
-bool stopSeekToThread = false;
 
 inline OperationFailed createException(int code, std::string reason) {
     OperationFailed io;
@@ -64,12 +94,8 @@ void RemoteTranscoderServer::Probe(std::string &_return, const ProbeType &input)
 
     std::string streamId = input.responseIp + "_" + input.responsePort;
 
-    if (handler[streamId] != nullptr) {
-        handler[streamId]->stopVideo();
-    }
-
-    delete handler[streamId];
-    handler.erase(streamId);
+    std::lock_guard<std::recursive_mutex> lock(handlerMutex);
+    removeHandler(streamId);
 
     auto stream = new StreamHandler(input.responseIp, std::stoi(input.responsePort), input.vdrIp, std::stoi(input.vdrPort), transcodeConfig,  movie_path, transparentMovie);
     stream->setKodi(enableKodi, kodiPath);
@@ -90,8 +116,10 @@ bool RemoteTranscoderServer::StreamUrl(const StreamUrlType &input) {
 
     std::string streamId = input.responseIp + "_" + input.responsePort;
 
+    std::lock_guard<std::recursive_mutex> lock(handlerMutex);
+
     // call of probe before StreamUrl is a must
-    auto stream = handler[streamId];
+    auto stream = findHandler(streamId);
 
     if (stream == nullptr) {
         ERROR("Probe has not been called before StreamUrl. Aborting...");
@@ -107,8 +135,10 @@ bool RemoteTranscoderServer::StreamUrl(const StreamUrlType &input) {
 bool RemoteTranscoderServer::Pause(const PauseType &input) {
     INFO("Pause streamId {}", input.streamId);
 
-    if (handler[input.streamId] != nullptr) {
-        handler[input.streamId]->pauseVideo();
+    std::lock_guard<std::recursive_mutex> lock(handlerMutex);
+    auto stream = findHandler(input.streamId);
+    if (stream != nullptr) {
+        stream->pauseVideo();
     }
 
     return true;
@@ -116,6 +146,8 @@ bool RemoteTranscoderServer::Pause(const PauseType &input) {
 
 bool RemoteTranscoderServer::SeekTo(const SeekToType &input) {
     INFO("SeekTo streamId {}, to {}\n", input.streamId, input.seekTo);
+
+    std::lock_guard<std::recursive_mutex> lock(handlerMutex);
 
     // search existing seekToRequests
     auto it = seekToVec.begin();
@@ -146,8 +178,10 @@ bool RemoteTranscoderServer::SeekTo(const SeekToType &input) {
 bool RemoteTranscoderServer::Resume(const ResumeType &input) {
     DEBUG("Resume: StreamId: {}, Position: {}", input.streamId, input.position);
 
-    if (handler[input.streamId] != nullptr) {
-        handler[input.streamId]->resumeVideo(input.position);
+    std::lock_guard<std::recursive_mutex> lock(handlerMutex);
+    auto stream = findHandler(input.streamId);
+    if (stream != nullptr) {
+        stream->resumeVideo(input.position);
     }
 
     return true;
@@ -156,11 +190,8 @@ bool RemoteTranscoderServer::Resume(const ResumeType &input) {
 bool RemoteTranscoderServer::Stop(const StopType &input) {
     INFO("Stop streamId {}, reason {}", input.streamId, input.reason);
 
-    if (handler[input.streamId] != nullptr) {
-        handler[input.streamId]->stopVideo();
-        delete handler[input.streamId];
-        handler.erase(input.streamId);
-    }
+    std::lock_guard<std::recursive_mutex> lock(handlerMutex);
+    removeHandler(input.streamId);
 
     return true;
 }
@@ -168,20 +199,25 @@ bool RemoteTranscoderServer::Stop(const StopType &input) {
 void RemoteTranscoderServer::AudioInfo(std::string &_return, const AudioInfoType &input) {
     DEBUG("AudioInfo: StreamId: {}", input.streamId);
 
-    if (handler[input.streamId] != nullptr) {
-        _return = handler[input.streamId]->getAudioInfo();
+    std::lock_guard<std::recursive_mutex> lock(handlerMutex);
+    auto stream = findHandler(input.streamId);
+    if (stream != nullptr) {
+        _return = stream->getAudioInfo();
     } else {
         throw createException(401, "Unknown streamId");
     }
 }
 
 void RemoteTranscoderServer::GetVideo(std::string &_return, const VideoType &input) {
-    DEBUG("GetVideo: filename: {} with size {}", input.filename, transparentVideos[input.filename].length());
+    std::lock_guard<std::recursive_mutex> lock(handlerMutex);
+
+    auto video = transparentVideos.find(input.filename);
+    DEBUG("GetVideo: filename: {} with size {}", input.filename, video != transparentVideos.end() ? video->second.length() : 0);
 
     if (input.filename == "fake-video.webm") {
         _return = fakeMovie;
-    } else if (!transparentVideos[input.filename].empty()) {
-        _return = transparentVideos[input.filename];
+    } else if (video != transparentVideos.end() && !video->second.empty()) {
+        _return = video->second;
     } else {
         throw createException(401, "Unknown video filename");
     }
@@ -207,11 +243,9 @@ void RemoteTranscoderCloneFactory::releaseHandler(CommonServiceIf *handler) {
 
 void performSeekTo() {
     while (!stopSeekToThread) {
-        if (seekToVec.empty()) {
-            // nothing to do, wait
-            std::this_thread::sleep_for(std::chrono::milliseconds(25));
-            continue;
-        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+
+        std::lock_guard<std::recursive_mutex> lock(handlerMutex);
 
         // iterate over all
         std::vector<SeekToRequests>::iterator it = seekToVec.begin();
@@ -220,15 +254,16 @@ void performSeekTo() {
                     std::chrono::high_resolution_clock::now() - it->lastSeek).count();
 
             if (diff >= seekPause) {
-                // Seek and delete
-                handler[it->streamId]->seekTo(it->seekTo);
+                // Seek and delete. The stream may have been stopped in the meantime.
+                auto stream = findHandler(it->streamId);
+                if (stream != nullptr) {
+                    stream->seekTo(it->seekTo);
+                }
                 it = seekToVec.erase(it);
             } else {
                 ++it;
             }
         }
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(25));
     }
 }
 
