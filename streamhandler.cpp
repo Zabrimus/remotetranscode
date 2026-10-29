@@ -90,6 +90,13 @@ std::shared_ptr<std::string> StreamHandler::probeVideo(std::string url, std::str
 
         duration = "N/A";
 
+        // the audio infos are filled once per probe, not on every (re)start of the stream
+        bstreams = json::array();
+        for (const auto& a : m3u.audio) {
+            json st = json::parse("{ \"codec_type\": \"audio\", \"tags\": { \"language\": \"" + a.language + "\", \"comment\": \"" + a.name + "\" }}");
+            bstreams.push_back(st);
+        }
+
         videoInfo = std::make_shared<std::string>();
         *videoInfo = std::string("m3u video stream");
     } else if (enableKodi && (endsWith(url, ".mpd") || (url.find("hbbtv.zdf.de/zdfm3/dyn/mpd.php") != std::string::npos))) {
@@ -257,11 +264,6 @@ std::vector<std::string> StreamHandler::prepareStreamM3uCmd(std::string url, std
     for (auto a : m3u.audio) {
         callStr.emplace_back("-i");
         callStr.emplace_back(a.uri);
-
-        // fill audio info in bstreams
-        json st = json::parse("{ \"codec_type\": \"audio\", \"tags\": { \"language\": \"" + a.language + "\", \"comment\": \"" + a.name + "\" }}");
-
-        bstreams.push_back(st);
     }
 
     // transmux
