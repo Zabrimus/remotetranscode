@@ -36,6 +36,24 @@ std::vector<std::string> split(std::string s, std::string delimiter) {
     return res;
 }
 
+// Network options for an input url. Without them ffmpeg/ffprobe wait forever
+// for a hanging server and abort a stream on the first connection reset.
+// Only for http(s), other protocols don't know the reconnect options.
+static void addNetworkOptions(std::vector<std::string>& callStr, const std::string& url) {
+    if (!startsWith(url, "http://") && !startsWith(url, "https://")) {
+        return;
+    }
+
+    callStr.emplace_back("-rw_timeout");
+    callStr.emplace_back("15000000"); // microseconds
+    callStr.emplace_back("-reconnect");
+    callStr.emplace_back("1");
+    callStr.emplace_back("-reconnect_streamed");
+    callStr.emplace_back("1");
+    callStr.emplace_back("-reconnect_delay_max");
+    callStr.emplace_back("5");
+}
+
 StreamHandler::StreamHandler(std::string browserIp, int browserPort, std::string vdrIp, int vdrPort, TranscodeConfig& tc, std::string movie_path, const std::string& tmovie) : browserIp(browserIp), browserPort(browserPort), transcodeConfig(tc), movie_path(movie_path), transparent_movie(tmovie) {
     streamHandler = nullptr;
     streamError = false;
@@ -152,6 +170,7 @@ std::vector<std::string> StreamHandler::prepareStreamCmd(std::string url, std::s
         callStr.emplace_back(position);
     }
 
+    addNetworkOptions(callStr, url);
     callStr.emplace_back("-i");
     callStr.emplace_back(url);
 
@@ -259,6 +278,7 @@ std::vector<std::string> StreamHandler::prepareStreamM3uCmd(std::string url, std
     }
 
     // add main input
+    addNetworkOptions(callStr, m3u.url);
     callStr.emplace_back("-i");
     callStr.emplace_back(m3u.url);
 
@@ -271,6 +291,7 @@ std::vector<std::string> StreamHandler::prepareStreamM3uCmd(std::string url, std
             callStr.emplace_back(position);
         }
 
+        addNetworkOptions(callStr, a.uri);
         callStr.emplace_back("-i");
         callStr.emplace_back(a.uri);
     }
@@ -460,6 +481,8 @@ std::shared_ptr<std::string> StreamHandler::probeFfmpeg(const std::string& url) 
             "ffprobe", "-hide_banner", "-i", url,
             "-loglevel", "quiet"
     };
+
+    addNetworkOptions(callStr, url);
 
     if (!referer.empty()) {
         callStr.push_back("-referer");
