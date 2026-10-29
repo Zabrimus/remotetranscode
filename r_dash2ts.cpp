@@ -97,7 +97,8 @@ int main(int argc, char *argv[]) {
         path_to_kodi = "/storage/.kodi";
     }
 
-    if (url.empty() || user_agent.empty() || referer.empty()) {
+    // referer may be empty, e.g. document.referrer of a directly started HbbTV app
+    if (url.empty() || user_agent.empty()) {
         usage();
         exit(EXIT_FAILURE);
     }
@@ -118,7 +119,11 @@ int main(int argc, char *argv[]) {
 
     INFO("Found inputstream.adaptive Library, version {}", api_version);
 
-    std::string httpHeader = "Referer=" + referer + "&User-Agent=" + user_agent;
+    std::string httpHeader = "User-Agent=" + user_agent;
+
+    if (!referer.empty()) {
+        httpHeader += "&Referer=" + referer;
+    }
 
     if (!cookies.empty()) {
         httpHeader += "&cookie=" + urlEncode(cookies);
