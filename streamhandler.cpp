@@ -348,16 +348,11 @@ bool StreamHandler::streamVideo(std::string url, std::string position, std::stri
             }
 
             if (hasStreamError()) {
+                // report the error only once and stop the stream
                 browserClient->StreamError("Encrypted Stream");
+                stopRequest = true;
+                terminateStream();
             } else {
-                if (!browserClient->ping()) {
-                    // connection problems? abort transcoding
-                    ERROR("Unable to connect to browser. Abort transcoding...");
-                    stopRequest = true;
-                    terminateStream();
-                    return;
-                }
-
                 std::string packets = std::string(bytes, n);
                 if (!vdrClient->ProcessTSPacket(packets)) {
                     // connection problems? abort transcoding
