@@ -46,7 +46,7 @@ int main(int argc, char *argv[]) {
     int api_version = 0;
     int loglevel = 1;
     bool probeOnly = false;
-    int startPosition;
+    int startPosition = 0;
 
     use_TCP = false;
 
