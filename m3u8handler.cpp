@@ -21,6 +21,40 @@ std::vector<std::string> M3u8Handler::split(const std::string &s, char delim) {
     return result;
 }
 
+// resolve a (relative) url of the playlist against the url of the playlist itself
+static std::string resolveUrl(const std::string& base, const std::string& ref) {
+    if (ref.rfind("http://", 0) == 0 || ref.rfind("https://", 0) == 0) {
+        return ref;
+    }
+
+    auto schemeEnd = base.find("://");
+    if (schemeEnd == std::string::npos) {
+        return ref;
+    }
+
+    if (ref.rfind("//", 0) == 0) {
+        // scheme relative
+        return base.substr(0, schemeEnd + 1) + ref;
+    }
+
+    auto pathStart = base.find('/', schemeEnd + 3);
+    std::string origin = pathStart == std::string::npos ? base : base.substr(0, pathStart);
+
+    if (!ref.empty() && ref[0] == '/') {
+        // absolute path
+        return origin + ref;
+    }
+
+    // relative path: base without query and fragment, up to the last '/'
+    std::string path = base.substr(0, base.find_first_of("?#"));
+    auto last = path.find_last_of('/');
+    if (last == std::string::npos || last < schemeEnd + 3) {
+        return origin + "/" + ref;
+    }
+
+    return path.substr(0, last + 1) + ref;
+}
+
 m3u_stream M3u8Handler::parseM3u() {
     DEBUG("Load file " + webUri);
 
@@ -60,6 +94,9 @@ m3u_stream M3u8Handler::parseM3u() {
         return result;
     }
 
+    // relative urls refer to the playlist after all redirects
+    std::string baseUri = res->location.empty() ? webUri : res->location;
+
     std::string m3u = res->body;
     std::istringstream stream(m3u);
     std::string line;
@@ -94,11 +131,7 @@ m3u_stream M3u8Handler::parseM3u() {
                             m3uMax.pop_back();
                         }
 
-                        if (!startsWith(m3uMax, "http://") && !startsWith(m3uMax, "https://")) {
-                            // this is a relative URL -> construct absolute URL
-                            auto last = webUri.find_last_of('/');
-                            m3uMax = webUri.substr(0, last+1).append(m3uMax);
-                        }
+                        m3uMax = resolveUrl(baseUri, m3uMax);
                     }
                 } else if (startsWith(t, "AUDIO=")) {
                     audioGroup = t.substr(7, t.length()-8);
@@ -130,11 +163,7 @@ m3u_stream M3u8Handler::parseM3u() {
             }
 
             if (addThis) {
-                if (!startsWith(m.uri, "http://") && !startsWith(m.uri, "https://")) {
-                    // this is a relative URL -> construct absolute URL
-                    auto last = webUri.find_last_of('/');
-                    m.uri = webUri.substr(0, last+1).append(m.uri);
-                }
+                m.uri = resolveUrl(baseUri, m.uri);
 
                 result.audio.push_back(m);
             }
