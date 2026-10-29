@@ -24,7 +24,7 @@ typedef struct {
 
 class M3u8Handler {
 public:
-    explicit M3u8Handler(std::string uri);
+    explicit M3u8Handler(std::string uri, std::string userAgent = "", std::string referer = "", std::string cookies = "");
     m3u_stream parseM3u();
 
 private:
@@ -33,4 +33,7 @@ private:
 
 private:
     std::string webUri;
+    std::string userAgent;
+    std::string referer;
+    std::string cookies;
 };

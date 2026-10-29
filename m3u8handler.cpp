@@ -1,7 +1,8 @@
 #include "m3u8handler.h"
 #include "logger.h"
 
-M3u8Handler::M3u8Handler(std::string uri) : webUri(uri) {
+M3u8Handler::M3u8Handler(std::string uri, std::string userAgent, std::string referer, std::string cookies)
+    : webUri(uri), userAgent(std::move(userAgent)), referer(std::move(referer)), cookies(std::move(cookies)) {
 }
 
 bool M3u8Handler::startsWith(const std::string& str, const std::string& prefix) {
@@ -33,7 +34,20 @@ m3u_stream M3u8Handler::parseM3u() {
         path += "?" + uri.query_string;
     }
 
-    auto res = cli.Get(path);
+    // same request as the browser and ffmpeg would do
+    httplib::Headers headers;
+    if (!userAgent.empty()) {
+        headers.emplace("User-Agent", userAgent);
+    }
+    if (!referer.empty()) {
+        headers.emplace("Referer", referer);
+    }
+    if (!cookies.empty()) {
+        headers.emplace("Cookie", cookies);
+    }
+
+    cli.set_follow_location(true);
+    auto res = cli.Get(path, headers);
 
     m3u_stream result;
     result.width = result.height = 0;

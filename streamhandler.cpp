@@ -80,7 +80,7 @@ std::shared_ptr<std::string> StreamHandler::probeVideo(std::string url, std::str
 
     std::shared_ptr<std::string> videoInfo;
     if (endsWith(url, ".m3u") || endsWith(url, ".m3u8")) {
-        auto m = M3u8Handler(url);
+        auto m = M3u8Handler(url, userAgent, referer, cookies);
         m3u = m.parseM3u();
 
         if (m3u.height == 0 && m3u.width == 0) {
