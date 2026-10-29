@@ -14,7 +14,7 @@
 #include "streamhandler.h"
 #include "transcodeconfig.h"
 
-TThreadPoolServer *thriftServer;
+TThreadedServer *thriftServer;
 
 std::string transcoderIp;
 int transcoderPort;
@@ -286,19 +286,15 @@ inline bool startsWith(const std::string& str, const std::string& prefix) {
 }
 
 void startServer() {
-    const int workerCount = 4;
-    std::shared_ptr<ThreadManager> threadManager = ThreadManager::newSimpleThreadManager(workerCount);
-    threadManager->threadFactory(std::make_shared<ThreadFactory>());
-    threadManager->start();
-
     std::string listenIp = bindAll ? "0.0.0.0" : transcoderIp;
 
-    thriftServer = new TThreadPoolServer(
+    // one thread per connection: the clients keep their connections open,
+    // a fixed pool of 4 workers blocks any further client
+    thriftServer = new TThreadedServer(
             std::make_shared<RemoteTranscoderProcessorFactory>(std::make_shared<RemoteTranscoderCloneFactory>()),
             std::make_shared<TServerSocket>(listenIp, transcoderPort),
             std::make_shared<TBufferedTransportFactory>(),
-            std::make_shared<TBinaryProtocolFactory>(),
-            threadManager);
+            std::make_shared<TBinaryProtocolFactory>());
 
     thriftServer->serve();
 }
