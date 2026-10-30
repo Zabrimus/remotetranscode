@@ -225,9 +225,11 @@ std::vector<std::string> StreamHandler::prepareStreamCmd(std::string url, std::s
             }
         }
     } else {
-        // let ffmpeg decide which streams to copy
+        // let ffmpeg decide which streams to copy. Its automatic selection may choose a
+        // text subtitle, which can't be copied into a TS and aborts the whole stream.
         callStr.emplace_back("-codec");
         callStr.emplace_back("copy");
+        callStr.emplace_back("-sn");
     }
 
     callStr.emplace_back("-f");
@@ -312,9 +314,10 @@ std::vector<std::string> StreamHandler::prepareStreamM3uCmd(std::string url, std
         callStr.emplace_back(a.uri);
     }
 
-    // transmux
+    // transmux. HLS subtitles (WebVTT) can't be copied into a TS.
     callStr.emplace_back("-codec");
     callStr.emplace_back("copy");
+    callStr.emplace_back("-sn");
 
     // main input
     if (!m3u.audio.empty()) {
