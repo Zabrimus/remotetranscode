@@ -224,6 +224,18 @@ std::vector<std::string> StreamHandler::prepareStreamCmd(std::string url, std::s
                 outIndex++;
             }
         }
+
+        // add DVB subtitle streams, other subtitle formats can't be put into the TS
+        for (auto &v: bstreams) {
+            if (v.value("codec_type", "") == "subtitle" && v.value("codec_name", "") == "dvb_subtitle") {
+                callStr.emplace_back("-map");
+                callStr.emplace_back("0:" + std::to_string((int) v["index"]));
+                callStr.emplace_back("-c:" + std::to_string(outIndex));
+                callStr.emplace_back("copy");
+
+                outIndex++;
+            }
+        }
     } else {
         // let ffmpeg decide which streams to copy. Its automatic selection may choose a
         // text subtitle, which can't be copied into a TS and aborts the whole stream.
@@ -324,16 +336,17 @@ std::vector<std::string> StreamHandler::prepareStreamM3uCmd(std::string url, std
         callStr.emplace_back("-map");
         callStr.emplace_back("0:v");
 
-        // audio contained in the variant itself (rendition without URI), if any
-        callStr.emplace_back("-map");
-        callStr.emplace_back("0:a?");
-
         int idx = 1;
         for (auto a: m3u.audio) {
             callStr.emplace_back("-map");
             callStr.emplace_back(std::to_string(idx) + ":a");
             idx++;
         }
+
+        // audio contained in the variant itself (rendition without URI), if any.
+        // Mapped last, so the indexes of the audio infos match the order in the TS.
+        callStr.emplace_back("-map");
+        callStr.emplace_back("0:a?");
 
         callStr.insert(std::end(callStr), std::begin(audioMetadata), std::end(audioMetadata));
     }
@@ -637,6 +650,9 @@ std::shared_ptr<std::string> StreamHandler::probeFfmpeg(const std::string& url) 
                     std::string cnt = el["codec_tag_string"];
                     *videoResult = cn + "/" + cnt;
                 }
+            } else if (el.value("codec_type", "") == "subtitle" && el.value("codec_name", "") == "dvb_subtitle") {
+                // DVB subtitles can be copied into the TS, VDR displays them itself
+                bestProgram.push_back(el);
             } else if (el.contains("codec_type") && el["codec_type"] == "audio") {
                 // check if the stream has a sample rate
                 if (el.contains("sample_rate")) {
@@ -834,37 +850,48 @@ bool StreamHandler::createVideoWithLength(std::string seconds, const std::string
 std::string StreamHandler::getAudioInfo() {
     json result;
     result["stream"] = json::array();
+    result["subtitle"] = json::array();
 
-    // add audio streams, the index counts audio streams only
+    auto tag = [](const json& v, const char* name) -> std::string {
+        if (v.contains("tags") && v["tags"].is_object() && v["tags"].contains(name) && v["tags"][name].is_string()) {
+            return v["tags"][name];
+        }
+        return "";
+    };
+
+    auto disposition = [](const json& v, const char* name) -> bool {
+        return v.contains("disposition") && v["disposition"].is_object() && v["disposition"].value(name, 0) != 0;
+    };
+
+    // The index counts the audio (subtitle) streams in the order of the TS. VDR selects
+    // the track with the same index in the PID ordered track list.
     int audioIndex = 0;
+    int subtitleIndex = 0;
     for (auto& v : bstreams) {
-        if (!v.is_object() || v.value("codec_type", "") != "audio") {
+        if (!v.is_object()) {
             continue;
         }
 
-        std::string language;
-        std::string comment;
+        std::string type = v.value("codec_type", "");
 
-        // tags are optional and may contain only some of the values
-        if (v.contains("tags") && v["tags"].is_object()) {
-            const auto& tags = v["tags"];
-            if (tags.contains("language") && tags["language"].is_string()) {
-                language = tags["language"];
-            }
-            if (tags.contains("comment") && tags["comment"].is_string()) {
-                comment = tags["comment"];
-            } else if (tags.contains("handler_name") && tags["handler_name"].is_string()) {
-                comment = tags["handler_name"];
-            }
+        if (type == "audio") {
+            json lang;
+            lang["index"] = audioIndex++;
+            lang["language"] = tag(v, "language");
+            lang["comment"] = !tag(v, "comment").empty() ? tag(v, "comment") : tag(v, "handler_name");
+            lang["codec"] = v.value("codec_name", "");
+            lang["channels"] = v.value("channels", 0);
+            lang["audioDescription"] = disposition(v, "visual_impaired");
+
+            result["stream"].push_back(lang);
+        } else if (type == "subtitle" && v.value("codec_name", "") == "dvb_subtitle") {
+            json sub;
+            sub["index"] = subtitleIndex++;
+            sub["language"] = tag(v, "language");
+            sub["hearingImpaired"] = disposition(v, "hearing_impaired");
+
+            result["subtitle"].push_back(sub);
         }
-
-        json lang;
-        lang["index"] = audioIndex;
-        lang["language"] = language;
-        lang["comment"] = comment;
-
-        result["stream"].push_back(lang);
-        audioIndex++;
     }
 
     return result.dump();
