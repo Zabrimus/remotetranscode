@@ -19,7 +19,8 @@ private:
     std::string ffmpeg;
 
     std::atomic<TinyProcessLib::Process*> streamHandler;
-    std::thread *readerThread;
+    std::thread exitWatcher;          // waits for the end of the stream process
+    std::atomic<bool> stopping;       // the process is stopped on purpose
 
     bool enableKodi;
     std::string kodiPath;

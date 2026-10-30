@@ -56,6 +56,7 @@ static void addNetworkOptions(std::vector<std::string>& callStr, const std::stri
 
 StreamHandler::StreamHandler(std::string browserIp, int browserPort, std::string vdrIp, int vdrPort, TranscodeConfig& tc, std::string movie_path, const std::string& tmovie) : browserIp(browserIp), browserPort(browserPort), transcodeConfig(tc), movie_path(movie_path), transparent_movie(tmovie) {
     streamHandler = nullptr;
+    stopping = false;
     streamError = false;
     stopRequest = false;
     isMpdStream = false;
@@ -416,7 +417,9 @@ bool StreamHandler::streamVideo(std::string url, std::string position, std::stri
         callStr = prepareStreamCmd(url, position, cookies, referer, userAgent);
     }
 
-    streamHandler = new TinyProcessLib::Process(callStr, "",
+    stopping = false;
+
+    TinyProcessLib::Process *process = new TinyProcessLib::Process(callStr, "",
         [this](const char *bytes, size_t n) {
             if (stopRequest) {
                 return;
@@ -457,6 +460,19 @@ bool StreamHandler::streamVideo(std::string url, std::string position, std::stri
         true
     );
 
+    streamHandler = process;
+
+    // The process ends at the end of the stream (exit code 0). get_exit_status() returns
+    // after all output has been delivered, so VDR has got all packets at this time.
+    exitWatcher = std::thread([this, process]() {
+        int exit = process->get_exit_status();
+        DEBUG("Stream process finished with exit code {}", exit);
+
+        if (exit == 0 && !stopping && !stopRequest) {
+            vdrClient->EndOfStream();
+        }
+    });
+
     return true;
 }
 
@@ -483,11 +499,17 @@ void StreamHandler::terminateStream() {
 }
 
 void StreamHandler::stopVideo() {
-    // the reader thread may still access streamHandler until get_exit_status() returns
+    // the reader thread may still access streamHandler until the process has finished
     TinyProcessLib::Process *p = streamHandler.load();
     if (p != nullptr) {
+        stopping = true;
         p->kill(true);
-        p->get_exit_status();
+
+        // the watcher waits for the process and its reader threads
+        if (exitWatcher.joinable()) {
+            exitWatcher.join();
+        }
+
         streamHandler = nullptr;
         delete p;
     }
