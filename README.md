@@ -10,6 +10,10 @@ meson install
 ```
 The release exists in the subdirectory ```Release``` of the build folder.
 
+With ```meson setup -Drelease_dir=false build``` the binaries are installed into the ```bindir``` of the prefix
+and the movie files into ```<datadir>/remotetranscode/movie```, e.g. ```/usr/local/share/remotetranscode/movie```.
+Then start remotrans with ```-m``` and this directory.
+
 ## Configuration
 A default configuration can be found in folder config: ```sockets.ini```.
 

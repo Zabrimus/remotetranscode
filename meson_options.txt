@@ -1,2 +1,3 @@
 option('debug_thrift', type: 'boolean', value: false, description: 'Enable more debug logging')
 option('vdrsternelec', type: 'boolean', value: false, description: 'Build for VDR*ELEC')
+option('release_dir', type: 'boolean', value: true, description: 'Install into the subdirectory Release of the build folder instead of the prefix')
