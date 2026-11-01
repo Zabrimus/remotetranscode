@@ -71,6 +71,9 @@ StreamHandler::~StreamHandler() {
     stopRequest = false;
     stopVideo();
     remove((movie_path + "/" + transparentVideoFile).c_str());
+
+    // the transparent video is kept in memory, every stream has its own one
+    transparentVideos.erase(transparentVideoFile);
     delete vdrClient;
     delete browserClient;
 }
