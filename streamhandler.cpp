@@ -477,6 +477,12 @@ bool StreamHandler::streamVideo(std::string url, std::string position, std::stri
 }
 
 bool StreamHandler::pauseVideo() {
+    // the MSE stream continues after the pause
+    if (mse) {
+        mse->pause();
+        return true;
+    }
+
     if (streamHandler != nullptr) {
         stopVideo();
     }
@@ -485,6 +491,11 @@ bool StreamHandler::pauseVideo() {
 }
 
 bool StreamHandler::resumeVideo(std::string position) {
+    if (mse) {
+        mse->resume();
+        return true;
+    }
+
     streamVideo(currentUrl, position, cookies, referer, userAgent);
 
     return true;
@@ -499,6 +510,8 @@ void StreamHandler::terminateStream() {
 }
 
 void StreamHandler::stopVideo() {
+    mse.reset();
+
     // the reader thread may still access streamHandler until the process has finished
     TinyProcessLib::Process *p = streamHandler.load();
     if (p != nullptr) {
@@ -516,6 +529,11 @@ void StreamHandler::stopVideo() {
 }
 
 bool StreamHandler::seekTo(std::string pos) {
+    // the browser resets a MSE stream itself, the next segments follow
+    if (mse) {
+        return true;
+    }
+
     pauseVideo();
     vdrClient->Seeked();
     resumeVideo(pos);
@@ -870,6 +888,10 @@ bool StreamHandler::createVideoWithLength(std::string seconds, const std::string
 }
 
 std::string StreamHandler::getAudioInfo() {
+    if (mse) {
+        return mse->audioInfo();
+    }
+
     json result;
     result["stream"] = json::array();
     result["subtitle"] = json::array();
@@ -917,4 +939,65 @@ std::string StreamHandler::getAudioInfo() {
     }
 
     return result.dump();
+}
+
+std::shared_ptr<std::string> StreamHandler::mseStart(const std::string& postfix, const std::string& duration, const std::vector<std::string>& tracks) {
+    this->postfix = postfix;
+
+    stopVideo();
+    stopRequest = false;
+    streamError = false;
+
+    // the transparent video of the browser has the duration of the MSE stream
+    transparentVideoFile = "transparent-video-" + browserIp + "_" + std::to_string(browserPort) + "-" + this->postfix + ".webm";
+
+    std::string length = "N/A";
+    try {
+        double d = std::stod(duration);
+        if (d > 0 && d < 100000) {
+            length = std::to_string(d);
+        }
+    } catch (...) {
+        // live stream or unknown duration
+    }
+
+    if (!createVideoWithLength(length, transparentVideoFile)) {
+        return nullptr;
+    }
+
+    // audio infos are taken from the init segments
+    bstreams = json::array();
+
+    mse = std::make_unique<MseRemuxer>(vdrClient, tracks);
+
+    std::string info = "mse";
+    for (const auto& t : tracks) {
+        info += " " + t;
+    }
+
+    DEBUG("MSE start: {}", info);
+
+    return std::make_shared<std::string>(info);
+}
+
+bool StreamHandler::mseAppend(int track, const std::string& data) {
+    return mse && mse->append(track, data);
+}
+
+bool StreamHandler::mseReset() {
+    if (!mse) {
+        return false;
+    }
+
+    mse->reset();
+    return true;
+}
+
+bool StreamHandler::mseEndOfStream() {
+    if (!mse) {
+        return false;
+    }
+
+    mse->endOfStream();
+    return true;
 }

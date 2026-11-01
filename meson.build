@@ -69,7 +69,7 @@ if get_option('debug_thrift')
     trans_compile_args += '-DDEBUG_THRIFTCLIENT'
 endif
 
-remotrans = executable('remotrans', 'main.cpp', 'logger.cpp', 'streamhandler.cpp', 'transcodeconfig.cpp',
+remotrans = executable('remotrans', 'main.cpp', 'logger.cpp', 'streamhandler.cpp', 'mse.cpp', 'transcodeconfig.cpp',
                         'm3u8handler.cpp', 'thrift-services/src-client/BrowserClient.cpp', 'thrift-services/src-client/VdrClient.cpp',
                         'thrift-services/src-gen/CommonService.cpp', 'thrift-services/src-gen/common_types.cpp',
 	                    'thrift-services/src-gen/CefBrowser.cpp', 'thrift-services/src-gen/cefbrowser_types.cpp',

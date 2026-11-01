@@ -9,6 +9,7 @@
 #include "transcodeconfig.h"
 #include "json.hpp"
 #include "m3u8handler.h"
+#include "mse.h"
 
 using json = nlohmann::json;
 
@@ -46,6 +47,12 @@ public:
 
     std::string getAudioInfo();
 
+    // Media Source Extensions
+    std::shared_ptr<std::string> mseStart(const std::string& postfix, const std::string& duration, const std::vector<std::string>& tracks);
+    bool mseAppend(int track, const std::string& data);
+    bool mseReset();
+    bool mseEndOfStream();
+
     std::string getVideoName() { return transparentVideoFile; };
 
 private:
@@ -68,6 +75,9 @@ private:
 
     // m3u streams
     m3u_stream m3u;
+
+    // MSE streams
+    std::unique_ptr<MseRemuxer> mse;
 
     std::string currentUrl;
 

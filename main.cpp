@@ -225,19 +225,45 @@ void RemoteTranscoderServer::GetVideo(std::string &_return, const VideoType &inp
 }
 
 void RemoteTranscoderServer::MseStart(std::string &_return, const MseStartType &input) {
-    throw createException(501, "MSE is not supported");
+    INFO("MseStart with {} tracks, stream will be sent to {}:{}", input.tracks.size(), input.vdrIp, input.vdrPort);
+
+    std::string streamId = input.responseIp + "_" + input.responsePort;
+
+    std::lock_guard<std::recursive_mutex> lock(handlerMutex);
+    removeHandler(streamId);
+
+    auto stream = new StreamHandler(input.responseIp, std::stoi(input.responsePort), input.vdrIp, std::stoi(input.vdrPort), transcodeConfig, movie_path, transparentMovie);
+    stream->setKodi(enableKodi, kodiPath);
+    handler[streamId] = stream;
+
+    auto videoInfo = stream->mseStart(input.postfix, input.duration, input.tracks);
+    if (videoInfo == nullptr) {
+        throw createException(401, "Unable to start the MSE stream");
+    }
+
+    _return = *videoInfo;
 }
 
 bool RemoteTranscoderServer::MseAppend(const MseAppendType &input) {
-    return false;
+    std::lock_guard<std::recursive_mutex> lock(handlerMutex);
+    auto stream = findHandler(input.streamId);
+    return stream != nullptr && stream->mseAppend(input.track, input.data);
 }
 
 bool RemoteTranscoderServer::MseReset(const MseResetType &input) {
-    return false;
+    DEBUG("MseReset: StreamId: {}", input.streamId);
+
+    std::lock_guard<std::recursive_mutex> lock(handlerMutex);
+    auto stream = findHandler(input.streamId);
+    return stream != nullptr && stream->mseReset();
 }
 
 bool RemoteTranscoderServer::MseEndOfStream(const MseEndOfStreamType &input) {
-    return false;
+    DEBUG("MseEndOfStream: StreamId: {}", input.streamId);
+
+    std::lock_guard<std::recursive_mutex> lock(handlerMutex);
+    auto stream = findHandler(input.streamId);
+    return stream != nullptr && stream->mseEndOfStream();
 }
 
 RemoteTranscoderIf *RemoteTranscoderCloneFactory::getHandler(const TConnectionInfo &connInfo) {
