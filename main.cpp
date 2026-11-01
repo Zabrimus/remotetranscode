@@ -10,6 +10,7 @@
 #include "httplib.h"
 
 #include "main.h"
+#include "TransportBuffer.h"
 #include "logger.h"
 #include "streamhandler.h"
 #include "transcodeconfig.h"
@@ -293,7 +294,7 @@ void startServer() {
     thriftServer = new TThreadedServer(
             std::make_shared<RemoteTranscoderProcessorFactory>(std::make_shared<RemoteTranscoderCloneFactory>()),
             std::make_shared<TServerSocket>(listenIp, transcoderPort),
-            std::make_shared<TBufferedTransportFactory>(),
+            std::make_shared<TLargeBufferedTransportFactory>(),
             std::make_shared<TBinaryProtocolFactory>());
 
     thriftServer->serve();
