@@ -32,6 +32,10 @@ public:
     bool Stop(const StopType& input) override;
     void AudioInfo(std::string& _return, const AudioInfoType& input) override;
     void GetVideo(std::string& _return, const VideoType& input) override;
+    void MseStart(std::string& _return, const MseStartType& input) override;
+    bool MseAppend(const MseAppendType& input) override;
+    bool MseReset(const MseResetType& input) override;
+    bool MseEndOfStream(const MseEndOfStreamType& input) override;
 };
 
 class RemoteTranscoderCloneFactory : virtual public RemoteTranscoderIfFactory {

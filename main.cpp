@@ -224,6 +224,22 @@ void RemoteTranscoderServer::GetVideo(std::string &_return, const VideoType &inp
     }
 }
 
+void RemoteTranscoderServer::MseStart(std::string &_return, const MseStartType &input) {
+    throw createException(501, "MSE is not supported");
+}
+
+bool RemoteTranscoderServer::MseAppend(const MseAppendType &input) {
+    return false;
+}
+
+bool RemoteTranscoderServer::MseReset(const MseResetType &input) {
+    return false;
+}
+
+bool RemoteTranscoderServer::MseEndOfStream(const MseEndOfStreamType &input) {
+    return false;
+}
+
 RemoteTranscoderIf *RemoteTranscoderCloneFactory::getHandler(const TConnectionInfo &connInfo) {
     std::shared_ptr<TSocket> sock = std::dynamic_pointer_cast<TSocket>(connInfo.transport);
 
