@@ -60,6 +60,7 @@ StreamHandler::StreamHandler(std::string browserIp, int browserPort, std::string
     streamHandler = nullptr;
     stopping = false;
     processExited = true;
+    ffmpegCopy = false;
     streamError = false;
     stopRequest = false;
     isMpdStream = false;
