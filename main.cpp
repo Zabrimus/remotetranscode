@@ -4,6 +4,11 @@
 #include <getopt.h>
 #include <string>
 #include <filesystem>
+#include <atomic>
+#include <cerrno>
+#include <csignal>
+#include <unistd.h>
+#include <fcntl.h>
 #include "mini/ini.h"
 
 #define CPPHTTPLIB_OPENSSL_SUPPORT
@@ -37,7 +42,8 @@ struct SeekToRequests {
 };
 
 std::vector<SeekToRequests> seekToVec;
-bool stopSeekToThread = false;
+std::atomic<bool> stopSeekToThread{false};
+int signalPipe[2] = { -1, -1 };
 
 // handler, seekToVec and transparentVideos are used by the thrift worker threads and the seek thread
 std::recursive_mutex handlerMutex;
@@ -329,16 +335,6 @@ inline bool startsWith(const std::string& str, const std::string& prefix) {
 }
 
 void startServer() {
-    std::string listenIp = bindAll ? "0.0.0.0" : transcoderIp;
-
-    // one thread per connection: the clients keep their connections open,
-    // a fixed pool of 4 workers blocks any further client
-    thriftServer = new TThreadedServer(
-            std::make_shared<RemoteTranscoderProcessorFactory>(std::make_shared<RemoteTranscoderCloneFactory>()),
-            std::make_shared<TServerSocket>(listenIp, transcoderPort),
-            std::make_shared<TLargeBufferedTransportFactory>(),
-            std::make_shared<TBinaryProtocolFactory>());
-
     thriftServer->serve();
 }
 
@@ -397,9 +393,14 @@ bool readCodecFile(const char* codecFile) {
     return true;
 }
 
+// only async-signal-safe calls here: the main thread stops the server
 void signalHandler ( int signum ) {
-    stopSeekToThread = true;
-    thriftServer->stop();
+    int savedErrno = errno;
+    char c = 0;
+    if (write(signalPipe[1], &c, 1) < 0) {
+        // nothing to do
+    }
+    errno = savedErrno;
 }
 
 int main(int argc, char* argv[]) {
@@ -408,6 +409,12 @@ int main(int argc, char* argv[]) {
         return -1;
     }
 
+    if (pipe(signalPipe) != 0) {
+        ERROR("Unable to create the signal pipe: {}", strerror(errno));
+        return -1;
+    }
+    fcntl(signalPipe[0], F_SETFD, FD_CLOEXEC);
+    fcntl(signalPipe[1], F_SETFD, FD_CLOEXEC);
     signal(SIGINT, signalHandler) ;
     signal(SIGTERM, signalHandler) ;
 
@@ -508,10 +515,28 @@ int main(int argc, char* argv[]) {
     }
 
     // start server
+    std::string listenIp = bindAll ? "0.0.0.0" : transcoderIp;
+
+    // one thread per connection: the clients keep their connections open,
+    // a fixed pool of 4 workers blocks any further client
+    thriftServer = new TThreadedServer(
+            std::make_shared<RemoteTranscoderProcessorFactory>(std::make_shared<RemoteTranscoderCloneFactory>()),
+            std::make_shared<TServerSocket>(listenIp, transcoderPort),
+            std::make_shared<TLargeBufferedTransportFactory>(),
+            std::make_shared<TBinaryProtocolFactory>());
+
     std::thread t1(startServer);
 
     // start seekTo handler
     std::thread seekToThread = std::thread(performSeekTo);
+
+    // wait for SIGINT or SIGTERM
+    char signalByte;
+    while (read(signalPipe[0], &signalByte, 1) < 0 && errno == EINTR) {
+    }
+
+    stopSeekToThread = true;
+    thriftServer->stop();
 
     t1.join();
     seekToThread.join();
