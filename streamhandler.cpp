@@ -1,4 +1,6 @@
 #include <string>
+#include <csignal>
+#include <thread>
 #include <chrono>
 #include <iostream>
 #include <fstream>
@@ -57,6 +59,7 @@ static void addNetworkOptions(std::vector<std::string>& callStr, const std::stri
 StreamHandler::StreamHandler(std::string browserIp, int browserPort, std::string vdrIp, int vdrPort, TranscodeConfig& tc, std::string movie_path, const std::string& tmovie) : browserIp(browserIp), browserPort(browserPort), transcodeConfig(tc), movie_path(movie_path), transparent_movie(tmovie) {
     streamHandler = nullptr;
     stopping = false;
+    processExited = true;
     streamError = false;
     stopRequest = false;
     isMpdStream = false;
@@ -467,8 +470,10 @@ bool StreamHandler::streamVideo(std::string url, std::string position, std::stri
 
     // The process ends at the end of the stream (exit code 0). get_exit_status() returns
     // after all output has been delivered, so VDR has got all packets at this time.
+    processExited = false;
     exitWatcher = std::thread([this, process]() {
         int exit = process->get_exit_status();
+        processExited = true;
         DEBUG("Stream process finished with exit code {}", exit);
 
         if (exit == 0 && !stopping && !stopRequest) {
@@ -519,7 +524,21 @@ void StreamHandler::stopVideo() {
     TinyProcessLib::Process *p = streamHandler.load();
     if (p != nullptr) {
         stopping = true;
-        p->kill(true);
+
+        // The child creates its process group after the fork. A signal to the group
+        // before is lost and ffmpeg runs until the end of the video: repeat it.
+        for (int i = 0; i < 500 && !processExited; ++i) {
+            if (i % 10 == 0) {
+                p->kill(true);
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+
+        if (!processExited) {
+            ERROR("Stream process {} doesn't stop, kill it", (int) p->get_id());
+            ::kill(-p->get_id(), SIGKILL);
+            ::kill(p->get_id(), SIGKILL);
+        }
 
         // the watcher waits for the process and its reader threads
         if (exitWatcher.joinable()) {

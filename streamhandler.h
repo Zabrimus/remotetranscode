@@ -22,6 +22,7 @@ private:
     std::atomic<TinyProcessLib::Process*> streamHandler;
     std::thread exitWatcher;          // waits for the end of the stream process
     std::atomic<bool> stopping;       // the process is stopped on purpose
+    std::atomic<bool> processExited;  // the watcher has seen the end of the process
 
     bool enableKodi;
     std::string kodiPath;
