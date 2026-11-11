@@ -2,12 +2,14 @@
 
 #include <string>
 #include <thread>
+#include <atomic>
 #include "process.hpp"
 #include "BrowserClient.h"
 #include "VdrClient.h"
 #include "transcodeconfig.h"
 #include "json.hpp"
 #include "m3u8handler.h"
+#include "mse.h"
 
 using json = nlohmann::json;
 
@@ -17,8 +19,10 @@ class StreamHandler {
 private:
     std::string ffmpeg;
 
-    TinyProcessLib::Process *streamHandler;
-    std::thread *readerThread;
+    std::atomic<TinyProcessLib::Process*> streamHandler;
+    std::thread exitWatcher;          // waits for the end of the stream process
+    std::atomic<bool> stopping;       // the process is stopped on purpose
+    std::atomic<bool> processExited;  // the watcher has seen the end of the process
 
     bool enableKodi;
     std::string kodiPath;
@@ -36,6 +40,7 @@ public:
     bool pauseVideo();
     bool resumeVideo(std::string position);
     void stopVideo();
+    void terminateStream();
     bool seekTo(std::string pos);
 
     bool hasStreamError() { return streamError; };
@@ -43,14 +48,20 @@ public:
 
     std::string getAudioInfo();
 
+    // Media Source Extensions
+    std::shared_ptr<std::string> mseStart(const std::string& postfix, const std::string& duration, const std::vector<std::string>& tracks);
+    bool mseAppend(int track, const std::string& data);
+    bool mseReset();
+    bool mseEndOfStream();
+
     std::string getVideoName() { return transparentVideoFile; };
 
 private:
     std::string browserIp;
     int browserPort;
 
-    bool streamError;
-    bool stopRequest;
+    std::atomic<bool> streamError;
+    std::atomic<bool> stopRequest;
 
     std::string cookies;
     std::string referer;
@@ -65,6 +76,9 @@ private:
 
     // m3u streams
     m3u_stream m3u;
+
+    // MSE streams
+    std::unique_ptr<MseRemuxer> mse;
 
     std::string currentUrl;
 

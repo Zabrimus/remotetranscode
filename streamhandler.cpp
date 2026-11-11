@@ -1,4 +1,6 @@
 #include <string>
+#include <csignal>
+#include <thread>
 #include <chrono>
 #include <iostream>
 #include <fstream>
@@ -36,8 +38,29 @@ std::vector<std::string> split(std::string s, std::string delimiter) {
     return res;
 }
 
+// Network options for an input url. Without them ffmpeg/ffprobe wait forever
+// for a hanging server and abort a stream on the first connection reset.
+// Only for http(s), other protocols don't know the reconnect options.
+static void addNetworkOptions(std::vector<std::string>& callStr, const std::string& url) {
+    if (!startsWith(url, "http://") && !startsWith(url, "https://")) {
+        return;
+    }
+
+    callStr.emplace_back("-rw_timeout");
+    callStr.emplace_back("15000000"); // microseconds
+    callStr.emplace_back("-reconnect");
+    callStr.emplace_back("1");
+    callStr.emplace_back("-reconnect_streamed");
+    callStr.emplace_back("1");
+    callStr.emplace_back("-reconnect_delay_max");
+    callStr.emplace_back("5");
+}
+
 StreamHandler::StreamHandler(std::string browserIp, int browserPort, std::string vdrIp, int vdrPort, TranscodeConfig& tc, std::string movie_path, const std::string& tmovie) : browserIp(browserIp), browserPort(browserPort), transcodeConfig(tc), movie_path(movie_path), transparent_movie(tmovie) {
     streamHandler = nullptr;
+    stopping = false;
+    processExited = true;
+    ffmpegCopy = false;
     streamError = false;
     stopRequest = false;
     isMpdStream = false;
@@ -52,6 +75,9 @@ StreamHandler::~StreamHandler() {
     stopRequest = false;
     stopVideo();
     remove((movie_path + "/" + transparentVideoFile).c_str());
+
+    // the transparent video is kept in memory, every stream has its own one
+    transparentVideos.erase(transparentVideoFile);
     delete vdrClient;
     delete browserClient;
 }
@@ -80,7 +106,7 @@ std::shared_ptr<std::string> StreamHandler::probeVideo(std::string url, std::str
 
     std::shared_ptr<std::string> videoInfo;
     if (endsWith(url, ".m3u") || endsWith(url, ".m3u8")) {
-        auto m = M3u8Handler(url);
+        auto m = M3u8Handler(url, userAgent, referer, cookies);
         m3u = m.parseM3u();
 
         if (m3u.height == 0 && m3u.width == 0) {
@@ -89,6 +115,16 @@ std::shared_ptr<std::string> StreamHandler::probeVideo(std::string url, std::str
         }
 
         duration = "N/A";
+
+        // the audio infos are filled once per probe, not on every (re)start of the stream
+        bstreams = json::array();
+        for (const auto& a : m3u.audio) {
+            json st;
+            st["codec_type"] = "audio";
+            st["tags"]["language"] = a.language;
+            st["tags"]["comment"] = a.name;
+            bstreams.push_back(st);
+        }
 
         videoInfo = std::make_shared<std::string>();
         *videoInfo = std::string("m3u video stream");
@@ -142,6 +178,7 @@ std::vector<std::string> StreamHandler::prepareStreamCmd(std::string url, std::s
         callStr.emplace_back(position);
     }
 
+    addNetworkOptions(callStr, url);
     callStr.emplace_back("-i");
     callStr.emplace_back(url);
 
@@ -152,15 +189,16 @@ std::vector<std::string> StreamHandler::prepareStreamCmd(std::string url, std::s
         callStr.emplace_back("copy");
         callStr.emplace_back("-c:a");
         callStr.emplace_back("copy");
-        callStr.emplace_back("-ar");
-        callStr.emplace_back("48000");
 
         // add video stream
+        // Note: the stream specifier of -c refers to the output stream index,
+        // which is the order of the -map options, not the input stream index.
+        int outIndex = 0;
         for (auto &v: bstreams) {
             if (v["codec_type"] == "video") {
                 callStr.emplace_back("-map");
                 callStr.emplace_back("0:" + std::to_string((int) v["index"]));
-                callStr.emplace_back("-c:" + std::to_string((int) v["index"]));
+                callStr.emplace_back("-c:" + std::to_string(outIndex));
 
                 if (transcodeConfig.isCopyVideo(v["codec_name"])) {
                     callStr.emplace_back("copy");
@@ -168,6 +206,8 @@ std::vector<std::string> StreamHandler::prepareStreamCmd(std::string url, std::s
                     auto videoParameter = transcodeConfig.getVideoTranscodeParameter();
                     callStr.insert(callStr.end(), videoParameter.begin(), videoParameter.end());
                 }
+
+                outIndex++;
             }
         }
 
@@ -176,22 +216,40 @@ std::vector<std::string> StreamHandler::prepareStreamCmd(std::string url, std::s
             if (v["codec_type"] == "audio") {
                 callStr.emplace_back("-map");
                 callStr.emplace_back("0:" + std::to_string((int) v["index"]));
-                callStr.emplace_back("-c:" + std::to_string((int) v["index"]));
+                callStr.emplace_back("-c:" + std::to_string(outIndex));
 
                 if (transcodeConfig.isCopyAudio(v["codec_name"], v["sample_rate"])) {
                     callStr.emplace_back("copy");
-                    callStr.emplace_back("-ar");
-                    callStr.emplace_back("48000");
                 } else {
                     auto audioParameter = transcodeConfig.getAudioTranscodeParameter();
                     callStr.insert(callStr.end(), audioParameter.begin(), audioParameter.end());
+
+                    // a sample rate can only be set if the audio is encoded
+                    callStr.emplace_back("-ar:" + std::to_string(outIndex));
+                    callStr.emplace_back("48000");
                 }
+
+                outIndex++;
+            }
+        }
+
+        // add DVB subtitle streams, other subtitle formats can't be put into the TS
+        for (auto &v: bstreams) {
+            if (v.value("codec_type", "") == "subtitle" && v.value("codec_name", "") == "dvb_subtitle") {
+                callStr.emplace_back("-map");
+                callStr.emplace_back("0:" + std::to_string((int) v["index"]));
+                callStr.emplace_back("-c:" + std::to_string(outIndex));
+                callStr.emplace_back("copy");
+
+                outIndex++;
             }
         }
     } else {
-        // let ffmpeg decide which streams to copy
+        // let ffmpeg decide which streams to copy. Its automatic selection may choose a
+        // text subtitle, which can't be copied into a TS and aborts the whole stream.
         callStr.emplace_back("-codec");
         callStr.emplace_back("copy");
+        callStr.emplace_back("-sn");
     }
 
     callStr.emplace_back("-f");
@@ -242,24 +300,44 @@ std::vector<std::string> StreamHandler::prepareStreamM3uCmd(std::string url, std
     }
 
     // add main input
+    addNetworkOptions(callStr, m3u.url);
     callStr.emplace_back("-i");
     callStr.emplace_back(m3u.url);
 
-    // add optional audio input
+    // add optional audio input. -ss is an input option and must be repeated
+    // for every input, otherwise the audio starts at 0 after a seek or resume.
     std::vector<std::string> audioMetadata;
     for (auto a : m3u.audio) {
+        if (!endsWith(url, ".mpd") && (url.find("hbbtv.zdf.de/zdfm3/dyn/mpd.php") == std::string::npos)) {
+            callStr.emplace_back("-ss");
+            callStr.emplace_back(position);
+        }
+
+        // the http options are input options, they apply to the next input only
+        if (!referer.empty()) {
+            callStr.emplace_back("-referer");
+            callStr.emplace_back(referer);
+        }
+
+        if (!userAgent.empty()) {
+            callStr.emplace_back("-user_agent");
+            callStr.emplace_back(userAgent);
+        }
+
+        if (!cookies.empty()) {
+            callStr.emplace_back("-headers");
+            callStr.emplace_back("Cookie: " + cookies);
+        }
+
+        addNetworkOptions(callStr, a.uri);
         callStr.emplace_back("-i");
         callStr.emplace_back(a.uri);
-
-        // fill audio info in bstreams
-        json st = json::parse("{ \"codec_type\": \"audio\", \"tags\": { \"language\": \"" + a.language + "\", \"comment\": \"" + a.name + "\" }}");
-
-        bstreams.push_back(st);
     }
 
-    // transmux
+    // transmux. HLS subtitles (WebVTT) can't be copied into a TS.
     callStr.emplace_back("-codec");
     callStr.emplace_back("copy");
+    callStr.emplace_back("-sn");
 
     // main input
     if (!m3u.audio.empty()) {
@@ -272,6 +350,11 @@ std::vector<std::string> StreamHandler::prepareStreamM3uCmd(std::string url, std
             callStr.emplace_back(std::to_string(idx) + ":a");
             idx++;
         }
+
+        // audio contained in the variant itself (rendition without URI), if any.
+        // Mapped last, so the indexes of the audio infos match the order in the TS.
+        callStr.emplace_back("-map");
+        callStr.emplace_back("0:a?");
 
         callStr.insert(std::end(callStr), std::begin(audioMetadata), std::end(audioMetadata));
     }
@@ -320,6 +403,13 @@ bool StreamHandler::streamVideo(std::string url, std::string position, std::stri
 
     DEBUG("StreamVideo: {} -> {}", position, url);
 
+    // never run two ffmpeg processes for the same stream
+    stopVideo();
+
+    // a new stream starts without the errors of the previous one
+    stopRequest = false;
+    streamError = false;
+
     // create parameter list
     std::vector<std::string> callStr;
 
@@ -334,28 +424,27 @@ bool StreamHandler::streamVideo(std::string url, std::string position, std::stri
         callStr = prepareStreamCmd(url, position, cookies, referer, userAgent);
     }
 
-    streamHandler = new TinyProcessLib::Process(callStr, "",
+    stopping = false;
+
+    TinyProcessLib::Process *process = new TinyProcessLib::Process(callStr, "",
         [this](const char *bytes, size_t n) {
             if (stopRequest) {
                 return;
             }
 
             if (hasStreamError()) {
+                // report the error only once and stop the stream
                 browserClient->StreamError("Encrypted Stream");
+                stopRequest = true;
+                terminateStream();
             } else {
-                if (!browserClient->ping()) {
-                    // connection problems? abort transcoding
-                    ERROR("Unable to connect to browser. Abort transcoding...");
-                    // stopVideo();
-                    stopRequest = true;
-                }
-
                 std::string packets = std::string(bytes, n);
                 if (!vdrClient->ProcessTSPacket(packets)) {
                     // connection problems? abort transcoding
                     // This can be happen by intention, e.g. if VDR stops the video player
                     DEBUG("Unable to connect to vdr. Abort transcoding...");
                     stopRequest = true;
+                    terminateStream();
                 }
             }
         },
@@ -378,10 +467,31 @@ bool StreamHandler::streamVideo(std::string url, std::string position, std::stri
         true
     );
 
+    streamHandler = process;
+
+    // The process ends at the end of the stream (exit code 0). get_exit_status() returns
+    // after all output has been delivered, so VDR has got all packets at this time.
+    processExited = false;
+    exitWatcher = std::thread([this, process]() {
+        int exit = process->get_exit_status();
+        processExited = true;
+        DEBUG("Stream process finished with exit code {}", exit);
+
+        if (exit == 0 && !stopping && !stopRequest) {
+            vdrClient->EndOfStream();
+        }
+    });
+
     return true;
 }
 
 bool StreamHandler::pauseVideo() {
+    // the MSE stream continues after the pause
+    if (mse) {
+        mse->pause();
+        return true;
+    }
+
     if (streamHandler != nullptr) {
         stopVideo();
     }
@@ -390,21 +500,63 @@ bool StreamHandler::pauseVideo() {
 }
 
 bool StreamHandler::resumeVideo(std::string position) {
+    if (mse) {
+        mse->resume();
+        return true;
+    }
+
     streamVideo(currentUrl, position, cookies, referer, userAgent);
 
     return true;
 }
 
+void StreamHandler::terminateStream() {
+    // called from the reader thread: only signal ffmpeg, stopVideo() cleans up
+    TinyProcessLib::Process *p = streamHandler;
+    if (p != nullptr) {
+        p->kill();
+    }
+}
+
 void StreamHandler::stopVideo() {
-    if (streamHandler != nullptr) {
-        streamHandler->kill(true);
-        streamHandler->get_exit_status();
-        delete streamHandler;
+    mse.reset();
+
+    // the reader thread may still access streamHandler until the process has finished
+    TinyProcessLib::Process *p = streamHandler.load();
+    if (p != nullptr) {
+        stopping = true;
+
+        // The child creates its process group after the fork. A signal to the group
+        // before is lost and ffmpeg runs until the end of the video: repeat it.
+        for (int i = 0; i < 500 && !processExited; ++i) {
+            if (i % 10 == 0) {
+                p->kill(true);
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+
+        if (!processExited) {
+            ERROR("Stream process {} doesn't stop, kill it", (int) p->get_id());
+            ::kill(-p->get_id(), SIGKILL);
+            ::kill(p->get_id(), SIGKILL);
+        }
+
+        // the watcher waits for the process and its reader threads
+        if (exitWatcher.joinable()) {
+            exitWatcher.join();
+        }
+
         streamHandler = nullptr;
+        delete p;
     }
 }
 
 bool StreamHandler::seekTo(std::string pos) {
+    // the browser resets a MSE stream itself, the next segments follow
+    if (mse) {
+        return true;
+    }
+
     pauseVideo();
     vdrClient->Seeked();
     resumeVideo(pos);
@@ -424,6 +576,8 @@ std::shared_ptr<std::string> StreamHandler::probeFfmpeg(const std::string& url) 
             "ffprobe", "-hide_banner", "-i", url,
             "-loglevel", "quiet"
     };
+
+    addNetworkOptions(callStr, url);
 
     if (!referer.empty()) {
         callStr.push_back("-referer");
@@ -457,8 +611,8 @@ std::shared_ptr<std::string> StreamHandler::probeFfmpeg(const std::string& url) 
     int exit = process.get_exit_status();
 
     DEBUG("Probe exit code: {}", exit);
-    if (exit == 1) {
-        ERROR("Probe of '{}' failed.", url);
+    if (exit != 0) {
+        ERROR("Probe of '{}' failed with exit code {}.", url, exit);
         return nullptr;
     }
 
@@ -473,7 +627,18 @@ std::shared_ptr<std::string> StreamHandler::probeFfmpeg(const std::string& url) 
 
     *videoResult = "no video";
 
-    json st = json::parse(*output);
+    json st;
+    try {
+        st = json::parse(*output);
+    } catch (json::exception &e) {
+        ERROR("Probe of '{}' returned no usable result: {}", url, e.what());
+        return nullptr;
+    }
+
+    if (!st.is_object() || !st.contains("streams")) {
+        ERROR("Probe of '{}' found no streams.", url);
+        return nullptr;
+    }
 
     ffmpegCopy = false;
     json bestProgram;
@@ -548,6 +713,9 @@ std::shared_ptr<std::string> StreamHandler::probeFfmpeg(const std::string& url) 
                     std::string cnt = el["codec_tag_string"];
                     *videoResult = cn + "/" + cnt;
                 }
+            } else if (el.value("codec_type", "") == "subtitle" && el.value("codec_name", "") == "dvb_subtitle") {
+                // DVB subtitles can be copied into the TS, VDR displays them itself
+                bestProgram.push_back(el);
             } else if (el.contains("codec_type") && el["codec_type"] == "audio") {
                 // check if the stream has a sample rate
                 if (el.contains("sample_rate")) {
@@ -580,6 +748,9 @@ std::shared_ptr<std::string> StreamHandler::probeFfmpeg(const std::string& url) 
                         } else {
                             bestProgram.push_back(el);
                         }
+                    } else {
+                        // audio without any tags
+                        bestProgram.push_back(el);
                     }
                 }
             }
@@ -644,8 +815,8 @@ std::shared_ptr<std::string> StreamHandler::probeDash2ts(const std::string& url)
     int exit = process.get_exit_status();
 
     DEBUG("Probe exit code: {}", exit);
-    if (exit == 1) {
-        ERROR("Probe of '{}' failed.", url);
+    if (exit != 0) {
+        ERROR("Probe of '{}' failed with exit code {}.", url, exit);
         return nullptr;
     }
 
@@ -658,15 +829,19 @@ std::shared_ptr<std::string> StreamHandler::probeDash2ts(const std::string& url)
     DEBUG("Call r_dash2ts: {}", paramOut.str());
     DEBUG("OUTPUT( {} ) {}", exit, *output);
 
-    int tdur;
-    int ttime;
-    int tcap;
-    long pos;
-    long length;
-    int realTime;
+    int tdur = 0;
+    int ttime = 0;
+    int tcap = 0;
+    long pos = 0;
+    long length = 0;
+    int realTime = 0;
 
     auto idx = output->find("dash2ts result:");
-    sscanf(output->substr(idx).c_str(), "dash2ts result:%d:%d:%d:%ld:%ld:%d", &tdur, &ttime, &tcap, &pos, &length, &realTime);
+    if (idx == std::string::npos ||
+        sscanf(output->substr(idx).c_str(), "dash2ts result:%d:%d:%d:%ld:%ld:%d", &tdur, &ttime, &tcap, &pos, &length, &realTime) != 6) {
+        ERROR("Probe of '{}' returned no usable result.", url);
+        return nullptr;
+    }
 
     duration = std::to_string(tdur / 1000 + 1);
     capabilities = tcap;
@@ -736,30 +911,116 @@ bool StreamHandler::createVideoWithLength(std::string seconds, const std::string
 }
 
 std::string StreamHandler::getAudioInfo() {
+    if (mse) {
+        return mse->audioInfo();
+    }
+
     json result;
+    result["stream"] = json::array();
+    result["subtitle"] = json::array();
 
-    // add audio streams
+    auto tag = [](const json& v, const char* name) -> std::string {
+        if (v.contains("tags") && v["tags"].is_object() && v["tags"].contains(name) && v["tags"][name].is_string()) {
+            return v["tags"][name];
+        }
+        return "";
+    };
+
+    auto disposition = [](const json& v, const char* name) -> bool {
+        return v.contains("disposition") && v["disposition"].is_object() && v["disposition"].value(name, 0) != 0;
+    };
+
+    // The index counts the audio (subtitle) streams in the order of the TS. VDR selects
+    // the track with the same index in the PID ordered track list.
     int audioIndex = 0;
+    int subtitleIndex = 0;
     for (auto& v : bstreams) {
-        if (v["codec_type"] == "audio") {
-            std::string language;
-            std::string comment;
-
-            if (v.contains("tags")) {
-                language = v["tags"]["language"];
-                comment = v["tags"]["comment"];
-
-                json lang;
-                lang["index"] = audioIndex;
-                lang["language"] = language;
-                lang["comment"] = comment;
-
-                result["stream"].push_back(lang);
-            }
+        if (!v.is_object()) {
+            continue;
         }
 
-        audioIndex++;
+        std::string type = v.value("codec_type", "");
+
+        if (type == "audio") {
+            json lang;
+            lang["index"] = audioIndex++;
+            lang["language"] = tag(v, "language");
+            lang["comment"] = !tag(v, "comment").empty() ? tag(v, "comment") : tag(v, "handler_name");
+            lang["codec"] = v.value("codec_name", "");
+            lang["channels"] = v.value("channels", 0);
+            lang["audioDescription"] = disposition(v, "visual_impaired");
+
+            result["stream"].push_back(lang);
+        } else if (type == "subtitle" && v.value("codec_name", "") == "dvb_subtitle") {
+            json sub;
+            sub["index"] = subtitleIndex++;
+            sub["language"] = tag(v, "language");
+            sub["hearingImpaired"] = disposition(v, "hearing_impaired");
+
+            result["subtitle"].push_back(sub);
+        }
     }
 
     return result.dump();
+}
+
+std::shared_ptr<std::string> StreamHandler::mseStart(const std::string& postfix, const std::string& duration, const std::vector<std::string>& tracks) {
+    this->postfix = postfix;
+
+    stopVideo();
+    stopRequest = false;
+    streamError = false;
+
+    // the transparent video of the browser has the duration of the MSE stream
+    transparentVideoFile = "transparent-video-" + browserIp + "_" + std::to_string(browserPort) + "-" + this->postfix + ".webm";
+
+    std::string length = "N/A";
+    try {
+        double d = std::stod(duration);
+        if (d > 0 && d < 100000) {
+            length = std::to_string(d);
+        }
+    } catch (...) {
+        // live stream or unknown duration
+    }
+
+    if (!createVideoWithLength(length, transparentVideoFile)) {
+        return nullptr;
+    }
+
+    // audio infos are taken from the init segments
+    bstreams = json::array();
+
+    mse = std::make_unique<MseRemuxer>(vdrClient, tracks);
+
+    std::string info = "mse";
+    for (const auto& t : tracks) {
+        info += " " + t;
+    }
+
+    DEBUG("MSE start: {}", info);
+
+    return std::make_shared<std::string>(info);
+}
+
+bool StreamHandler::mseAppend(int track, const std::string& data) {
+    return mse && mse->append(track, data);
+}
+
+bool StreamHandler::mseReset() {
+    if (!mse) {
+        return false;
+    }
+
+    mse->reset();
+    return true;
+}
+
+bool StreamHandler::mseEndOfStream() {
+    if (!mse) {
+        return false;
+    }
+
+    mse->endOfStream();
+    return true;
 }

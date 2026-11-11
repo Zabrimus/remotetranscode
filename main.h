@@ -5,7 +5,7 @@
 #include <thrift/transport/TSocket.h>
 #include <thrift/protocol/TBinaryProtocol.h>
 #include <thrift/transport/TBufferTransports.h>
-#include <thrift/server/TThreadPoolServer.h>
+#include <thrift/server/TThreadedServer.h>
 #include <thrift/transport/TServerSocket.h>
 #include <thrift/transport/TBufferTransports.h>
 
@@ -32,6 +32,10 @@ public:
     bool Stop(const StopType& input) override;
     void AudioInfo(std::string& _return, const AudioInfoType& input) override;
     void GetVideo(std::string& _return, const VideoType& input) override;
+    void MseStart(std::string& _return, const MseStartType& input) override;
+    bool MseAppend(const MseAppendType& input) override;
+    bool MseReset(const MseResetType& input) override;
+    bool MseEndOfStream(const MseEndOfStreamType& input) override;
 };
 
 class RemoteTranscoderCloneFactory : virtual public RemoteTranscoderIfFactory {

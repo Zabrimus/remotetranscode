@@ -1,7 +1,9 @@
+#include <map>
 #include "m3u8handler.h"
 #include "logger.h"
 
-M3u8Handler::M3u8Handler(std::string uri) : webUri(uri) {
+M3u8Handler::M3u8Handler(std::string uri, std::string userAgent, std::string referer, std::string cookies)
+    : webUri(uri), userAgent(std::move(userAgent)), referer(std::move(referer)), cookies(std::move(cookies)) {
 }
 
 bool M3u8Handler::startsWith(const std::string& str, const std::string& prefix) {
@@ -20,13 +22,110 @@ std::vector<std::string> M3u8Handler::split(const std::string &s, char delim) {
     return result;
 }
 
+// resolve a (relative) url of the playlist against the url of the playlist itself
+static std::string resolveUrl(const std::string& base, const std::string& ref) {
+    if (ref.rfind("http://", 0) == 0 || ref.rfind("https://", 0) == 0) {
+        return ref;
+    }
+
+    auto schemeEnd = base.find("://");
+    if (schemeEnd == std::string::npos) {
+        return ref;
+    }
+
+    if (ref.rfind("//", 0) == 0) {
+        // scheme relative
+        return base.substr(0, schemeEnd + 1) + ref;
+    }
+
+    auto pathStart = base.find('/', schemeEnd + 3);
+    std::string origin = pathStart == std::string::npos ? base : base.substr(0, pathStart);
+
+    if (!ref.empty() && ref[0] == '/') {
+        // absolute path
+        return origin + ref;
+    }
+
+    // relative path: base without query and fragment, up to the last '/'
+    std::string path = base.substr(0, base.find_first_of("?#"));
+    auto last = path.find_last_of('/');
+    if (last == std::string::npos || last < schemeEnd + 3) {
+        return origin + "/" + ref;
+    }
+
+    return path.substr(0, last + 1) + ref;
+}
+
+// parse an attribute list like 'BANDWIDTH=1,CODECS="avc1.4d401f,mp4a.40.2"'.
+// Commas inside quoted strings don't separate attributes, the quotes are removed.
+static std::map<std::string, std::string> parseAttributes(const std::string& list) {
+    std::map<std::string, std::string> result;
+
+    size_t pos = 0;
+    while (pos < list.length()) {
+        auto eq = list.find('=', pos);
+        if (eq == std::string::npos) {
+            break;
+        }
+
+        std::string name = list.substr(pos, eq - pos);
+        std::string value;
+
+        size_t next;
+        if (eq + 1 < list.length() && list[eq + 1] == '"') {
+            auto close = list.find('"', eq + 2);
+            if (close == std::string::npos) {
+                close = list.length();
+            }
+            value = list.substr(eq + 2, close - eq - 2);
+            next = list.find(',', close);
+        } else {
+            next = list.find(',', eq + 1);
+            value = list.substr(eq + 1, next == std::string::npos ? std::string::npos : next - eq - 1);
+        }
+
+        // trim blanks around the name
+        name.erase(0, name.find_first_not_of(' '));
+        name.erase(name.find_last_not_of(' ') + 1);
+
+        result[name] = value;
+
+        if (next == std::string::npos) {
+            break;
+        }
+        pos = next + 1;
+    }
+
+    return result;
+}
+
 m3u_stream M3u8Handler::parseM3u() {
     DEBUG("Load file " + webUri);
 
     auto uri = uri::parse_uri(webUri);
 
-    httplib::Client cli(uri.scheme + "://" + uri.authority.host + (uri.authority.port > 0 ? std::to_string(uri.authority.port) : ""));
-    auto res = cli.Get(uri.path);
+    httplib::Client cli(uri.scheme + "://" + uri.authority.host + (uri.authority.port > 0 ? ":" + std::to_string(uri.authority.port) : ""));
+
+    // keep the query, playlists are often protected by tokens in the query
+    std::string path = uri.path.empty() ? "/" : uri.path;
+    if (!uri.query_string.empty()) {
+        path += "?" + uri.query_string;
+    }
+
+    // same request as the browser and ffmpeg would do
+    httplib::Headers headers;
+    if (!userAgent.empty()) {
+        headers.emplace("User-Agent", userAgent);
+    }
+    if (!referer.empty()) {
+        headers.emplace("Referer", referer);
+    }
+    if (!cookies.empty()) {
+        headers.emplace("Cookie", cookies);
+    }
+
+    cli.set_follow_location(true);
+    auto res = cli.Get(path, headers);
 
     m3u_stream result;
     result.width = result.height = 0;
@@ -38,6 +137,9 @@ m3u_stream M3u8Handler::parseM3u() {
     if (res->status != 200) {
         return result;
     }
+
+    // relative urls refer to the playlist after all redirects
+    std::string baseUri = res->location.empty() ? webUri : res->location;
 
     std::string m3u = res->body;
     std::istringstream stream(m3u);
@@ -52,60 +154,45 @@ m3u_stream M3u8Handler::parseM3u() {
     std::string starterIgnore = "#EXTINF:";
 
     while (std::getline(stream, line)) {
+        // playlists with CRLF line endings
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+
         if (startsWith(line, starterStream)) {
-            auto splitted = split(line.substr(starterStream.length()), ',');
+            auto attr = parseAttributes(line.substr(starterStream.length()));
 
-            for (const auto& t : splitted) {
-                if (startsWith(t, "RESOLUTION=")) {
-                    int w, h;
-                    sscanf(t.c_str() + 11, "%dx%d", &w, &h);
+            if (attr.count("RESOLUTION")) {
+                int w = 0, h = 0;
+                sscanf(attr["RESOLUTION"].c_str(), "%dx%d", &w, &h);
 
-                    if (w > maxW) {
-                        maxW = w;
-                        maxH = h;
-                        std::getline(stream, m3uMax);
+                if (w > maxW) {
+                    maxW = w;
+                    maxH = h;
 
-                        if (!startsWith(m3uMax, "http://") && !startsWith(m3uMax, "https://")) {
-                            // this is a relative URL -> construct absolute URL
-                            auto last = webUri.find_last_of('/');
-                            m3uMax = webUri.substr(0, last+1).append(m3uMax);
-                        }
+                    // the audio group of the selected variant
+                    audioGroup = attr.count("AUDIO") ? attr["AUDIO"] : "";
+
+                    std::getline(stream, m3uMax);
+                    if (!m3uMax.empty() && m3uMax.back() == '\r') {
+                        m3uMax.pop_back();
                     }
-                } else if (startsWith(t, "AUDIO=")) {
-                    audioGroup = t.substr(7, t.length()-8);
+
+                    m3uMax = resolveUrl(baseUri, m3uMax);
                 }
             }
+
         } else if (startsWith(line, starterMedia)) {
-            auto splitted = split(line.substr(starterMedia.length()), ',');
+            auto attr = parseAttributes(line.substr(starterMedia.length()));
 
-            bool addThis = true;
-            media m;
-
-            for (const auto& t : splitted) {
-                if (startsWith(t, "TYPE=")) {
-                    m.type = t.substr(5);
-                    if (m.type != "AUDIO") {
-                        // no audio -> skip
-                        addThis = false;
-                        break;
-                    }
-                } else if (startsWith(t, "LANGUAGE=")) {
-                    m.language = t.substr(10, t.length()-11);
-                } else if (startsWith(t, "NAME=")) {
-                    m.name = t.substr(6, t.length()-7);
-                } else if (startsWith(t, "GROUP-ID=")) {
-                    m.groupId = t.substr(10, t.length()-11);
-                } else if (startsWith(t, "URI=")) {
-                    m.uri = t.substr(5, t.length()-6);
-                }
-            }
-
-            if (addThis) {
-                if (!startsWith(m.uri, "http://") && !startsWith(m.uri, "https://")) {
-                    // this is a relative URL -> construct absolute URL
-                    auto last = webUri.find_last_of('/');
-                    m.uri = webUri.substr(0, last+1).append(m.uri);
-                }
+            // an audio rendition without URI is contained in the variant stream itself
+            if (attr["TYPE"] == "AUDIO" && !attr["URI"].empty()) {
+                media m;
+                m.type = attr["TYPE"];
+                m.language = attr["LANGUAGE"];
+                m.name = attr["NAME"];
+                m.groupId = attr["GROUP-ID"];
+                m.uri = resolveUrl(baseUri, attr["URI"]);
 
                 result.audio.push_back(m);
             }

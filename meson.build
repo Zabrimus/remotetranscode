@@ -62,6 +62,18 @@ mini_dep = mini_proj.get_variable('mini_dep')
 dash2ts_proj = subproject('dash2ts')
 dash2ts_dep = dash2ts_proj.get_variable('dash2ts_dep')
 
+#
+# install directories: the subdirectory Release of the build folder (default)
+# or the standard directories of the prefix
+#
+if get_option('release_dir')
+    bin_dir = meson.current_build_dir() + '/Release'
+    movie_dir = bin_dir
+else
+    bin_dir = get_option('bindir')
+    movie_dir = get_option('datadir') / 'remotetranscode'
+endif
+
 incdir = include_directories(['thrift-services/src-gen', 'thrift-services/src-client'])
 trans_compile_args = []
 
@@ -69,7 +81,7 @@ if get_option('debug_thrift')
     trans_compile_args += '-DDEBUG_THRIFTCLIENT'
 endif
 
-remotrans = executable('remotrans', 'main.cpp', 'logger.cpp', 'streamhandler.cpp', 'transcodeconfig.cpp',
+remotrans = executable('remotrans', 'main.cpp', 'logger.cpp', 'streamhandler.cpp', 'mse.cpp', 'transcodeconfig.cpp',
                         'm3u8handler.cpp', 'thrift-services/src-client/BrowserClient.cpp', 'thrift-services/src-client/VdrClient.cpp',
                         'thrift-services/src-gen/CommonService.cpp', 'thrift-services/src-gen/common_types.cpp',
 	                    'thrift-services/src-gen/CefBrowser.cpp', 'thrift-services/src-gen/cefbrowser_types.cpp',
@@ -78,22 +90,22 @@ remotrans = executable('remotrans', 'main.cpp', 'logger.cpp', 'streamhandler.cpp
                         include_directories : incdir,
                         cpp_args : trans_compile_args,
                         install : true,
-                        install_dir : meson.current_build_dir() + '/Release',
+                        install_dir : bin_dir,
                         dependencies: [mini_dep, spdlog_dep, tiny_process_library_dep, openssl_dep, thrift_dep])
 
 r_dash2ts = executable('r_dash2ts', 'r_dash2ts.cpp', 'logger.cpp',
                        cpp_args : trans_compile_args,
                        install : true,
-                       install_dir : meson.current_build_dir() + '/Release',
+                       install_dir : bin_dir,
                        dependencies: [spdlog_dep, dash2ts_dep])
 
 r_dash2tsd = executable('r_dash2ts_debug', 'r_dash2ts_debug.cpp', 'logger.cpp',
                        cpp_args : trans_compile_args,
                        install : true,
-                       install_dir : meson.current_build_dir() + '/Release',
+                       install_dir : bin_dir,
                        dependencies: [spdlog_dep, dash2ts_dep])
 
 #
 # install
 #
-install_subdir('static-content/movie', install_dir : meson.current_build_dir() + '/Release')
+install_subdir('static-content/movie', install_dir : movie_dir)
