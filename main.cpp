@@ -272,6 +272,22 @@ bool RemoteTranscoderServer::MseEndOfStream(const MseEndOfStreamType &input) {
     return stream != nullptr && stream->mseEndOfStream();
 }
 
+void RemoteTranscoderServer::DownloadLookup(DownloadLookupResult &_return, const DownloadLookupType &input) {
+    throw createException(501, "Downloads are not supported");
+}
+
+void RemoteTranscoderServer::DownloadStart(std::string &_return, const DownloadStartType &input) {
+    throw createException(501, "Downloads are not supported");
+}
+
+void RemoteTranscoderServer::DownloadList(std::vector<DownloadInfo> &_return) {
+    throw createException(501, "Downloads are not supported");
+}
+
+bool RemoteTranscoderServer::DownloadRemove(const DownloadRemoveType &input) {
+    throw createException(501, "Downloads are not supported");
+}
+
 RemoteTranscoderIf *RemoteTranscoderCloneFactory::getHandler(const TConnectionInfo &connInfo) {
     std::shared_ptr<TSocket> sock = std::dynamic_pointer_cast<TSocket>(connInfo.transport);
 

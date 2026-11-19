@@ -36,6 +36,10 @@ public:
     bool MseAppend(const MseAppendType& input) override;
     bool MseReset(const MseResetType& input) override;
     bool MseEndOfStream(const MseEndOfStreamType& input) override;
+    void DownloadLookup(DownloadLookupResult& _return, const DownloadLookupType& input) override;
+    void DownloadStart(std::string& _return, const DownloadStartType& input) override;
+    void DownloadList(std::vector<DownloadInfo>& _return) override;
+    bool DownloadRemove(const DownloadRemoveType& input) override;
 };
 
 class RemoteTranscoderCloneFactory : virtual public RemoteTranscoderIfFactory {
