@@ -19,6 +19,7 @@
 #include "logger.h"
 #include "streamhandler.h"
 #include "transcodeconfig.h"
+#include "download.h"
 
 TThreadedServer *thriftServer;
 
@@ -31,6 +32,9 @@ int browserPort;
 int seekPause;
 
 std::map<std::string, StreamHandler*> handler;
+
+// the stream of the last Probe or MseStart: a download takes this one
+std::string currentStreamId;
 
 std::mutex httpMutex;
 
@@ -77,6 +81,8 @@ std::string kodiPath = "/storage/.kodi";
 bool enableKodi = false;
 
 std::string movie_path = "./movie"; // default value
+std::string downloadDir;                // empty: no downloads
+std::string mediathekUrl = "https://mediathekviewweb.de";
 std::string transparentMovie;
 std::string fakeMovie;
 bool bindAll = false;
@@ -107,6 +113,7 @@ void RemoteTranscoderServer::Probe(std::string &_return, const ProbeType &input)
     auto stream = new StreamHandler(input.responseIp, std::stoi(input.responsePort), input.vdrIp, std::stoi(input.vdrPort), transcodeConfig,  movie_path, transparentMovie);
     stream->setKodi(enableKodi, kodiPath);
     handler[streamId] = stream;
+    currentStreamId = streamId;
 
     DEBUG("Probe video...");
     auto videoInfo = stream->probeVideo(input.url, "0", input.cookies, input.referer, input.userAgent, input.postfix);
@@ -241,6 +248,7 @@ void RemoteTranscoderServer::MseStart(std::string &_return, const MseStartType &
     auto stream = new StreamHandler(input.responseIp, std::stoi(input.responsePort), input.vdrIp, std::stoi(input.vdrPort), transcodeConfig, movie_path, transparentMovie);
     stream->setKodi(enableKodi, kodiPath);
     handler[streamId] = stream;
+    currentStreamId = streamId;
 
     auto videoInfo = stream->mseStart(input.postfix, input.duration, input.tracks);
     if (videoInfo == nullptr) {
@@ -273,19 +281,29 @@ bool RemoteTranscoderServer::MseEndOfStream(const MseEndOfStreamType &input) {
 }
 
 void RemoteTranscoderServer::DownloadLookup(DownloadLookupResult &_return, const DownloadLookupType &input) {
-    throw createException(501, "Downloads are not supported");
+    DownloadSource source;
+    {
+        std::lock_guard<std::recursive_mutex> lock(handlerMutex);
+        auto stream = findHandler(currentStreamId);
+        if (stream != nullptr) {
+            source = stream->getDownloadSource();
+        }
+    }
+
+    // the query of MediathekView takes a while, no lock
+    _return = downloads::lookup(input.channel, source);
 }
 
 void RemoteTranscoderServer::DownloadStart(std::string &_return, const DownloadStartType &input) {
-    throw createException(501, "Downloads are not supported");
+    _return = downloads::start(input.url, input.name, input.duration);
 }
 
 void RemoteTranscoderServer::DownloadList(std::vector<DownloadInfo> &_return) {
-    throw createException(501, "Downloads are not supported");
+    _return = downloads::list();
 }
 
 bool RemoteTranscoderServer::DownloadRemove(const DownloadRemoveType &input) {
-    throw createException(501, "Downloads are not supported");
+    return downloads::remove(input.id);
 }
 
 RemoteTranscoderIf *RemoteTranscoderCloneFactory::getHandler(const TConnectionInfo &connInfo) {
@@ -443,6 +461,8 @@ int main(int argc, char* argv[]) {
             { "bindall",     optional_argument, nullptr, 'b' },
             { "kodipath",    optional_argument, nullptr, 'k' },
             { "enablekodi",  optional_argument, nullptr, 'a' },
+            { "downloaddir", required_argument, nullptr, 'd' },
+            { "mediathek",   required_argument, nullptr, 'w' },
             {nullptr }
     };
 
@@ -450,7 +470,7 @@ int main(int argc, char* argv[]) {
     bindAll = false;
 
     seekPause = 500;
-    while ((c = getopt_long(argc, argv, "c:t:m:l:s:bak:", long_options, &option_index)) != -1) {
+    while ((c = getopt_long(argc, argv, "c:t:m:l:s:bak:d:w:", long_options, &option_index)) != -1) {
         switch (c) {
             case 'c':
                 if (!readConfiguration(optarg)) {
@@ -487,6 +507,14 @@ int main(int argc, char* argv[]) {
             case 'k':
                 kodiPath = std::string(optarg);
                 break;
+
+            case 'd':
+                downloadDir = std::string(optarg);
+                break;
+
+            case 'w':
+                mediathekUrl = std::string(optarg);
+                break;
         }
     }
 
@@ -502,6 +530,8 @@ int main(int argc, char* argv[]) {
     if (enableKodi) {
         INFO("Kodi has been enabled (-a). This is an experimental feature!");
     }
+
+    downloads::setup(downloadDir, mediathekUrl);
 
     // read whole transparent file into memory
     transparentMovie = readFile(movie_path + "/transparent-full.webm");
@@ -553,6 +583,7 @@ int main(int argc, char* argv[]) {
 
     stopSeekToThread = true;
     thriftServer->stop();
+    downloads::shutdown();
 
     t1.join();
     seekToThread.join();

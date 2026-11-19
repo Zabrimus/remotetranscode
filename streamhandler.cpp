@@ -41,7 +41,7 @@ std::vector<std::string> split(std::string s, std::string delimiter) {
 // Network options for an input url. Without them ffmpeg/ffprobe wait forever
 // for a hanging server and abort a stream on the first connection reset.
 // Only for http(s), other protocols don't know the reconnect options.
-static void addNetworkOptions(std::vector<std::string>& callStr, const std::string& url) {
+void addNetworkOptions(std::vector<std::string>& callStr, const std::string& url) {
     if (!startsWith(url, "http://") && !startsWith(url, "https://")) {
         return;
     }
@@ -984,6 +984,10 @@ std::shared_ptr<std::string> StreamHandler::mseStart(const std::string& postfix,
         // live stream or unknown duration
     }
 
+    // the segments can't be downloaded, but a lookup in MediathekView needs the duration
+    currentUrl.clear();
+    this->duration = length;
+
     if (!createVideoWithLength(length, transparentVideoFile)) {
         return nullptr;
     }
@@ -1023,4 +1027,31 @@ bool StreamHandler::mseEndOfStream() {
 
     mse->endOfStream();
     return true;
+}
+
+DownloadSource StreamHandler::getDownloadSource() {
+    DownloadSource source;
+
+    if (!mse) {
+        source.url = currentUrl;
+        source.cookies = cookies;
+        source.referer = referer;
+        source.userAgent = userAgent;
+
+        if (!ffmpegCopy) {
+            for (auto &v: bstreams) {
+                if (v["codec_type"] == "video" || v["codec_type"] == "audio") {
+                    source.maps.push_back("0:" + std::to_string((int) v["index"]));
+                }
+            }
+        }
+    }
+
+    try {
+        source.duration = std::stod(duration);
+    } catch (...) {
+        // N/A: live stream
+    }
+
+    return source;
 }

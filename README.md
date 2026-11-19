@@ -29,7 +29,16 @@ It's safe to use the same sockets.ini for all of the three parts (vdr-plugin-web
 -s / --seekPause <ms> (wait ms milliseconds before really doing a video jump. In the meantime all jumps are collected)
 -a / --enablekodi (use Kodi inputstream-adaptive for mpeg dash (Very experimental!)
 -k / --kodipath The path to inputstream-adaptive. (Default: /.storage/.kodi) 
+-d / --downloaddir <directory> (enables downloads of videos as MP4 into this directory)
+-w / --mediathek <url> (the MediathekViewWeb server, default https://mediathekviewweb.de)
 ```
+
+## Downloads
+With ```-d``` vdr-plugin-web can download the current video as MP4. The transcoder looks up
+the video in [MediathekViewWeb](https://mediathekviewweb.de) by channel and duration. An
+entry found there is downloaded as file of the broadcaster with a name of channel, topic,
+title and date. Otherwise the stream itself is saved. Downloads run in the background,
+independent of the playback. Incomplete files end with ```.part```.
 
 ## Logging
 Log entries will be written to stdout/stderr.

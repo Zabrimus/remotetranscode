@@ -8,12 +8,16 @@
 #include "VdrClient.h"
 #include "transcodeconfig.h"
 #include "json.hpp"
+#include "download.h"
 #include "m3u8handler.h"
 #include "mse.h"
 
 using json = nlohmann::json;
 
 extern std::map<std::string, std::string> transparentVideos;
+
+// timeouts and reconnects of ffmpeg for http(s) input
+void addNetworkOptions(std::vector<std::string>& callStr, const std::string& url);
 
 class StreamHandler {
 private:
@@ -55,6 +59,8 @@ public:
     bool mseEndOfStream();
 
     std::string getVideoName() { return transparentVideoFile; };
+
+    DownloadSource getDownloadSource();
 
 private:
     std::string browserIp;
