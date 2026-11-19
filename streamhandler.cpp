@@ -1039,8 +1039,9 @@ DownloadSource StreamHandler::getDownloadSource() {
         source.userAgent = userAgent;
 
         if (!ffmpegCopy) {
+            // HLS: the streams of the playlist have no index, ffmpeg chooses the best
             for (auto &v: bstreams) {
-                if (v["codec_type"] == "video" || v["codec_type"] == "audio") {
+                if ((v["codec_type"] == "video" || v["codec_type"] == "audio") && v.contains("index") && v["index"].is_number()) {
                     source.maps.push_back("0:" + std::to_string((int) v["index"]));
                 }
             }

@@ -371,6 +371,26 @@ std::vector<std::string> inputOptions(const DownloadSource& source) {
     return options;
 }
 
+// the duration in seconds, 0: unknown or live
+double probeDuration(const DownloadSource& source) {
+    std::vector<std::string> cmd = { "ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0" };
+    auto options = inputOptions(source);
+    cmd.insert(cmd.end(), options.begin(), options.end());
+    cmd.emplace_back(source.url);
+
+    std::string out;
+    TinyProcessLib::Process process(cmd, "", [&](const char *bytes, size_t n) { out.append(bytes, n); }, [](const char *, size_t) {});
+    if (process.get_exit_status() != 0) {
+        return 0;
+    }
+
+    try {
+        return std::stod(out);
+    } catch (...) {
+        return 0;       // N/A
+    }
+}
+
 // the bitrate of the downloaded streams in bit/s, 0: unknown
 int64_t bitrate(const DownloadSource& source) {
     std::vector<std::string> cmd = { "ffprobe", "-v", "error", "-print_format", "json",
@@ -562,7 +582,15 @@ DownloadLookupResult lookup(const std::string& vdrChannel, const DownloadSource&
         return result;
     }
 
-    int duration = (int) std::lround(source.duration);
+    // HLS: the probe of the playback doesn't read the duration
+    DownloadSource src = source;
+    if (src.duration <= 0 && !src.url.empty()) {
+        src.duration = probeDuration(src);
+        std::lock_guard<std::mutex> lock(mutex);
+        lastSource.duration = src.duration;
+    }
+
+    int duration = (int) std::lround(src.duration);
     if (duration <= 0) {
         result.error = "No video or a live stream";
         return result;
