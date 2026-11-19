@@ -24,8 +24,9 @@ void setup(const std::string& directory, const std::string& mediathekUrl);
 // the entries of MediathekView with the duration of the current video
 remotetranscoder::DownloadLookupResult lookup(const std::string& channel, const DownloadSource& source);
 
-// url empty: the stream of the last lookup. Returns an error, empty if started.
-std::string start(const std::string& url, const std::string& name, int duration);
+// url empty: the stream of the last lookup. maxRate in kbit/s, 0: unlimited.
+// Returns an error, empty if started.
+std::string start(const std::string& url, const std::string& name, int duration, int maxRate);
 
 std::vector<remotetranscoder::DownloadInfo> list();
 

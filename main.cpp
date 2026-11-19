@@ -295,7 +295,7 @@ void RemoteTranscoderServer::DownloadLookup(DownloadLookupResult &_return, const
 }
 
 void RemoteTranscoderServer::DownloadStart(std::string &_return, const DownloadStartType &input) {
-    _return = downloads::start(input.url, input.name, input.duration);
+    _return = downloads::start(input.url, input.name, input.duration, input.maxRate);
 }
 
 void RemoteTranscoderServer::DownloadList(std::vector<DownloadInfo> &_return) {

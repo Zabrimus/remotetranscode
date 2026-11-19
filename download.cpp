@@ -350,10 +350,88 @@ void finish(const std::shared_ptr<Download>& d, int exitStatus, const std::strin
     finished.notify_all();
 }
 
-void run(const std::shared_ptr<Download>& d, std::vector<std::string> cmd) {
+// referer, user agent, cookies and timeouts of the input, for ffmpeg and ffprobe
+std::vector<std::string> inputOptions(const DownloadSource& source) {
+    std::vector<std::string> options;
+
+    if (!source.referer.empty()) {
+        options.emplace_back("-referer");
+        options.emplace_back(source.referer);
+    }
+    if (!source.userAgent.empty()) {
+        options.emplace_back("-user_agent");
+        options.emplace_back(source.userAgent);
+    }
+    if (!source.cookies.empty()) {
+        options.emplace_back("-headers");
+        options.emplace_back("Cookie: " + source.cookies);
+    }
+
+    addNetworkOptions(options, source.url);
+    return options;
+}
+
+// the bitrate of the downloaded streams in bit/s, 0: unknown
+int64_t bitrate(const DownloadSource& source) {
+    std::vector<std::string> cmd = { "ffprobe", "-v", "error", "-print_format", "json",
+                                     "-show_entries", "format=bit_rate:stream=index,bit_rate:stream_tags=variant_bitrate" };
+    auto options = inputOptions(source);
+    cmd.insert(cmd.end(), options.begin(), options.end());
+    cmd.emplace_back(source.url);
+
+    std::string out;
+    TinyProcessLib::Process process(cmd, "", [&](const char *bytes, size_t n) { out.append(bytes, n); }, [](const char *, size_t) {});
+    if (process.get_exit_status() != 0) {
+        return 0;
+    }
+
+    try {
+        auto j = json::parse(out);
+
+        // HLS: the streams have no bitrate, but their variant has one. Without
+        // -map ffmpeg takes the best variant, the bitrate of the format is useless.
+        int64_t sum = 0;
+        int64_t variant = 0;
+        for (const auto& stream : j.value("streams", json::array())) {
+            std::string map = "0:" + std::to_string(number(stream, "index"));
+            if (!source.maps.empty() && std::find(source.maps.begin(), source.maps.end(), map) == source.maps.end()) {
+                continue;
+            }
+
+            sum += number(stream, "bit_rate");
+            if (stream.contains("tags")) {
+                variant = std::max(variant, number(stream["tags"], "variant_bitrate"));
+            }
+        }
+
+        int64_t rate = variant > 0 ? variant : source.maps.empty() && j.contains("format") ? number(j["format"], "bit_rate") : sum;
+
+        // less is no video
+        return rate >= 10000 ? rate : 0;
+    } catch (const std::exception& e) {
+        ERROR("Unable to read the bitrate: {}", e.what());
+        return 0;
+    }
+}
+
+void run(const std::shared_ptr<Download>& d, std::vector<std::string> cmd, const DownloadSource& source, int maxRate) {
     std::string out;            // incomplete line of the progress
     std::string lastError;
     std::mutex errorMutex;
+
+    // ffmpeg limits the speed only as multiple of the playback: the factor from the bitrate
+    if (maxRate > 0) {
+        int64_t rate = bitrate(source);
+        if (rate > 0) {
+            double factor = std::max(0.1, maxRate * 1000.0 / rate);
+            INFO("Download {}: {} kbit/s, limit {} kbit/s, read at {:.1f}x", d->name, rate / 1000, maxRate, factor);
+
+            auto input = std::find(cmd.begin(), cmd.end(), "-i");
+            cmd.insert(input, { "-readrate", std::to_string(factor) });
+        } else {
+            ERROR("Download {}: unknown bitrate, no limit", d->name);
+        }
+    }
 
     TinyProcessLib::Process process(cmd, "",
         [&](const char *bytes, size_t n) {
@@ -589,7 +667,7 @@ DownloadLookupResult lookup(const std::string& vdrChannel, const DownloadSource&
     return result;
 }
 
-std::string start(const std::string& url, const std::string& name, int duration) {
+std::string start(const std::string& url, const std::string& name, int duration, int maxRate) {
     DownloadSource source;
     if (url.empty()) {
         std::lock_guard<std::mutex> lock(mutex);
@@ -610,21 +688,8 @@ std::string start(const std::string& url, const std::string& name, int duration)
     auto d = std::make_shared<Download>();
 
     std::vector<std::string> cmd = { "ffmpeg", "-hide_banner", "-nostdin", "-nostats", "-loglevel", "error", "-y" };
-
-    if (!source.referer.empty()) {
-        cmd.emplace_back("-referer");
-        cmd.emplace_back(source.referer);
-    }
-    if (!source.userAgent.empty()) {
-        cmd.emplace_back("-user_agent");
-        cmd.emplace_back(source.userAgent);
-    }
-    if (!source.cookies.empty()) {
-        cmd.emplace_back("-headers");
-        cmd.emplace_back("Cookie: " + source.cookies);
-    }
-
-    addNetworkOptions(cmd, source.url);
+    auto options = inputOptions(source);
+    cmd.insert(cmd.end(), options.begin(), options.end());
     cmd.emplace_back("-i");
     cmd.emplace_back(source.url);
 
@@ -669,7 +734,7 @@ std::string start(const std::string& url, const std::string& name, int duration)
     cmd.emplace_back(part);
     INFO("Download {} from {}", d->name, source.url);
 
-    std::thread(run, d, cmd).detach();
+    std::thread(run, d, cmd, source, maxRate).detach();
     return "";
 }
 
