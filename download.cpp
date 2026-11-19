@@ -3,7 +3,11 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cerrno>
 #include <condition_variable>
+#include <cstring>
+#include <fcntl.h>
+#include <unistd.h>
 #include <csignal>
 #include <ctime>
 #include <filesystem>
@@ -300,6 +304,21 @@ std::string uniqueName(const std::string& name) {
     }
 }
 
+// CIFS and NFS may deny root what the mode bits allow: try it
+bool writable(const std::string& dir) {
+    std::string test = dir + "/.remotetranscode-write-test";
+
+    int fd = ::open(test.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
+    if (fd < 0) {
+        ERROR("Download directory {} is not writable: {}", dir, strerror(errno));
+        return false;
+    }
+
+    ::close(fd);
+    ::unlink(test.c_str());
+    return true;
+}
+
 void finish(const std::shared_ptr<Download>& d, int exitStatus, const std::string& lastError) {
     std::string part = directory + "/" + d->name + ".part";
     std::error_code ec;
@@ -449,13 +468,20 @@ DownloadLookupResult lookup(const std::string& vdrChannel, const DownloadSource&
     DownloadLookupResult result;
     result.stream = false;
 
+    std::string dir;
     {
         std::lock_guard<std::mutex> lock(mutex);
         if (directory.empty()) {
             result.error = "No download directory";
             return result;
         }
+        dir = directory;
         lastSource = source;
+    }
+
+    if (!writable(dir)) {
+        result.error = "The download directory is not writable";
+        return result;
     }
 
     int duration = (int) std::lround(source.duration);
@@ -610,6 +636,7 @@ std::string start(const std::string& url, const std::string& name, int duration)
 
     cmd.insert(cmd.end(), { "-c", "copy", "-f", "mp4", "-movflags", "+faststart", "-progress", "pipe:1" });
 
+    std::string part;
     {
         std::lock_guard<std::mutex> lock(mutex);
         if (directory.empty()) {
@@ -620,12 +647,26 @@ std::string start(const std::string& url, const std::string& name, int duration)
         d->name = uniqueName(name);
         d->state = "running";
         d->duration = source.duration;
+        part = directory + "/" + d->name + ".part";
         active[d->id] = d;
-        ++running;
-
-        cmd.emplace_back(directory + "/" + d->name + ".part");
     }
 
+    // a failure is reported at once, not later by ffmpeg in the list
+    int fd = ::open(part.c_str(), O_CREAT | O_EXCL | O_WRONLY, 0644);
+    if (fd < 0) {
+        ERROR("Unable to create {}: {}", part, strerror(errno));
+        std::lock_guard<std::mutex> lock(mutex);
+        active.erase(d->id);
+        return "The download directory is not writable";
+    }
+    ::close(fd);
+
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        ++running;
+    }
+
+    cmd.emplace_back(part);
     INFO("Download {} from {}", d->name, source.url);
 
     std::thread(run, d, cmd).detach();
