@@ -587,6 +587,14 @@ int main(int argc, char* argv[]) {
     t1.join();
     seekToThread.join();
 
+    // ffmpeg of a running stream would continue without its reader
+    {
+        std::lock_guard<std::recursive_mutex> lock(handlerMutex);
+        while (!handler.empty()) {
+            removeHandler(handler.begin()->first);
+        }
+    }
+
     return 0;
 }
 
