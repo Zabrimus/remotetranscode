@@ -910,7 +910,14 @@ void MseRemuxer::run() {
                 lock.unlock();
                 {
                     std::lock_guard<std::mutex> send(sendMutex);
-                    if (gen == generation) {
+
+                    bool current;
+                    {
+                        std::lock_guard<std::mutex> l(mutex);
+                        current = gen == generation && !stop;
+                    }
+
+                    if (current) {
                         vdrClient->EndOfStream();
                     }
                 }
