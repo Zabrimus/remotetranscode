@@ -55,6 +55,7 @@ DownloadSource lastSource;
 
 const int durationTolerance = 3;        // seconds
 const size_t maxCandidates = 10;
+const size_t maxProbes = 6;             // entries whose quality is probed
 
 std::string lower(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return std::tolower(c); });
@@ -469,10 +470,21 @@ double probeDuration(const DownloadSource& source) {
     }
 }
 
-// the bitrate of the downloaded streams in bit/s, 0: unknown
-int64_t bitrate(const DownloadSource& source) {
-    std::vector<std::string> cmd = { "ffprobe", "-v", "error", "-print_format", "json",
-                                     "-show_entries", "format=bit_rate:stream=index,bit_rate:stream_tags=variant_bitrate" };
+struct VideoInfo {
+    bool ok = false;
+    int width = 0;
+    int height = 0;
+    int64_t bitrate = 0;                // bit/s, 0: unknown
+    std::string map;                    // HLS: the chosen variant
+};
+
+// The size and bitrate of the video that is downloaded. HLS: the variant of the
+// map, else the best variant up to maxHeight (0: the best).
+VideoInfo videoInfo(const DownloadSource& source, int maxHeight) {
+    VideoInfo info;
+
+    std::vector<std::string> cmd = { "ffprobe", "-v", "error", "-print_format", "json", "-show_entries",
+                                     "program=program_id:program_tags=variant_bitrate:stream=index,codec_type,width,height,bit_rate:format=bit_rate" };
     auto options = inputOptions(source);
     cmd.insert(cmd.end(), options.begin(), options.end());
     cmd.emplace_back(source.url);
@@ -480,36 +492,102 @@ int64_t bitrate(const DownloadSource& source) {
     std::string out;
     TinyProcessLib::Process process(cmd, "", [&](const char *bytes, size_t n) { out.append(bytes, n); }, [](const char *, size_t) {});
     if (process.get_exit_status() != 0) {
-        return 0;
+        return info;
     }
 
     try {
         auto j = json::parse(out);
+        auto programs = j.value("programs", json::array());
 
-        // HLS: the streams have no bitrate, but their variant has one. Without
-        // -map ffmpeg takes the best variant, the bitrate of the format is useless.
-        int64_t sum = 0;
-        int64_t variant = 0;
-        for (const auto& stream : j.value("streams", json::array())) {
-            std::string map = "0:" + std::to_string(number(stream, "index"));
-            if (!source.maps.empty() && std::find(source.maps.begin(), source.maps.end(), map) == source.maps.end()) {
-                continue;
-            }
-
-            sum += number(stream, "bit_rate");
-            if (stream.contains("tags")) {
-                variant = std::max(variant, number(stream["tags"], "variant_bitrate"));
+        int fixed = -1;
+        for (const auto& m : source.maps) {
+            if (m.rfind("0:p:", 0) == 0) {
+                fixed = std::stoi(m.substr(4));
             }
         }
 
-        int64_t rate = variant > 0 ? variant : source.maps.empty() && j.contains("format") ? number(j["format"], "bit_rate") : sum;
+        if (programs.size() > 1 || fixed >= 0) {
+            // HLS variants: the best that fits, else the smallest
+            const json *best = nullptr;
+            const json *smallest = nullptr;
+            int bestHeight = -1, smallestHeight = INT32_MAX;
+            int64_t bestRate = -1;
+
+            for (const auto& p : programs) {
+                int height = 0;
+                for (const auto& st : p.value("streams", json::array())) {
+                    if (text(st, "codec_type") == "video") {
+                        height = std::max(height, (int) number(st, "height"));
+                    }
+                }
+                int64_t rate = p.contains("tags") ? number(p["tags"], "variant_bitrate") : 0;
+
+                if (fixed >= 0) {
+                    if (number(p, "program_id") == fixed) {
+                        best = &p;
+                    }
+                    continue;
+                }
+                if ((maxHeight <= 0 || height <= maxHeight) && (height > bestHeight || (height == bestHeight && rate > bestRate))) {
+                    best = &p;
+                    bestHeight = height;
+                    bestRate = rate;
+                }
+                if (height < smallestHeight) {
+                    smallest = &p;
+                    smallestHeight = height;
+                }
+            }
+
+            const json *p = best != nullptr ? best : smallest;
+            if (p == nullptr) {
+                return info;
+            }
+
+            for (const auto& st : p->value("streams", json::array())) {
+                if (text(st, "codec_type") == "video" && number(st, "height") > info.height) {
+                    info.width = (int) number(st, "width");
+                    info.height = (int) number(st, "height");
+                }
+            }
+            info.bitrate = p->contains("tags") ? number((*p)["tags"], "variant_bitrate") : 0;
+            info.map = "0:p:" + std::to_string(number(*p, "program_id"));
+        } else {
+            // the streams of the maps, without maps the best video
+            int64_t sum = 0;
+            for (const auto& st : j.value("streams", json::array())) {
+                std::string map = "0:" + std::to_string(number(st, "index"));
+                if (!source.maps.empty() && std::find(source.maps.begin(), source.maps.end(), map) == source.maps.end()) {
+                    continue;
+                }
+
+                sum += number(st, "bit_rate");
+                if (text(st, "codec_type") == "video" && number(st, "height") > info.height) {
+                    info.width = (int) number(st, "width");
+                    info.height = (int) number(st, "height");
+                }
+            }
+
+            // HLS with one variant: its bitrate, the bitrate of the format is useless
+            int64_t variant = programs.size() == 1 && programs[0].contains("tags") ? number(programs[0]["tags"], "variant_bitrate") : 0;
+            info.bitrate = variant > 0 ? variant : source.maps.empty() && j.contains("format") ? number(j["format"], "bit_rate") : sum;
+        }
 
         // less is no video
-        return rate >= 10000 ? rate : 0;
+        if (info.bitrate < 10000) {
+            info.bitrate = 0;
+        }
+        info.ok = info.height > 0 || info.bitrate > 0;
     } catch (const std::exception& e) {
-        ERROR("Unable to read the bitrate: {}", e.what());
-        return 0;
+        ERROR("Unable to read the video information: {}", e.what());
     }
+
+    return info;
+}
+
+// the bitrate of the downloaded streams in bit/s, 0: unknown
+int64_t bitrate(const DownloadSource& source) {
+    return videoInfo(source, 0).bitrate;
 }
 
 void run(const std::shared_ptr<Download>& d, std::vector<std::string> cmd, const DownloadSource& source, int maxRate) {
@@ -678,6 +756,19 @@ DownloadLookupResult lookup(const DownloadLookupType& input, const DownloadSourc
     result.stream = !source.url.empty();
     result.streamName = fileName(vdrChannel + " - " + formatTime(time(nullptr), "%Y-%m-%d %H-%M"));
 
+    // the stream: HLS in the quality of the setup
+    if (result.stream) {
+        VideoInfo v = videoInfo(src, input.maxHeight);
+        result.streamWidth = v.width;
+        result.streamHeight = v.height;
+        result.streamSize = v.bitrate * duration / 8;
+
+        if (!v.map.empty()) {
+            std::lock_guard<std::mutex> lock(mutex);
+            lastSource.maps = { v.map };
+        }
+    }
+
     Channel channel = mediathekChannel(vdrChannel);
     std::map<std::string, json> entries;
 
@@ -779,6 +870,9 @@ DownloadLookupResult lookup(const DownloadLookupType& input, const DownloadSourc
         double score;
         int64_t timestamp;
         DownloadCandidate candidate;
+        std::vector<std::string> urls;      // HD, medium, low
+        std::string medium;
+        int64_t mediumSize;
     };
     std::vector<Scored> scored;
 
@@ -846,15 +940,71 @@ DownloadLookupResult lookup(const DownloadLookupType& input, const DownloadSourc
         }
         score += epg;
 
-        scored.push_back({ score, c.timestamp, c });
+        std::vector<std::string> urls;
+        std::string medium = text(e, "url_video");
+        for (const auto& u : { expandUrl(text(e, "url_video_hd"), medium), medium, expandUrl(text(e, "url_video_low"), medium) }) {
+            if (!u.empty() && std::find(urls.begin(), urls.end(), u) == urls.end()) {
+                urls.push_back(u);
+            }
+        }
+
+        scored.push_back({ score, c.timestamp, c, urls, medium, number(e, "size") });
     }
 
     std::sort(scored.begin(), scored.end(), [](const Scored& a, const Scored& b) {
         return a.score != b.score ? a.score > b.score : a.timestamp > b.timestamp;
     });
+    if (scored.size() > maxCandidates) {
+        scored.resize(maxCandidates);
+    }
 
-    for (size_t i = 0; i < scored.size() && i < maxCandidates; ++i) {
-        result.candidates.push_back(scored[i].candidate);
+    // The quality: the best up to maxHeight. The first entries are probed at the same
+    // time, the others get the medium quality for SD.
+    auto choose = [&](Scored& sc) {
+        auto& c = sc.candidate;
+        VideoInfo chosen;
+        std::string chosenUrl;
+
+        for (const auto& u : sc.urls) {
+            DownloadSource s;
+            s.url = u;
+            VideoInfo v = videoInfo(s, 0);
+            if (!v.ok) {
+                continue;
+            }
+
+            chosen = v;
+            chosenUrl = u;
+            if (input.maxHeight <= 0 || v.height <= input.maxHeight) {
+                break;
+            }
+        }
+
+        if (!chosen.ok) {
+            return;
+        }
+
+        c.url = chosenUrl;
+        c.width = chosen.width;
+        c.height = chosen.height;
+        c.size = chosen.bitrate > 0 ? chosen.bitrate * c.duration / 8 : chosenUrl == sc.medium ? sc.mediumSize : 0;
+    };
+
+    std::vector<std::thread> probes;
+    for (size_t i = 0; i < scored.size(); ++i) {
+        if (i < maxProbes) {
+            probes.emplace_back(choose, std::ref(scored[i]));
+        } else if (input.maxHeight > 0 && input.maxHeight < 720 && !scored[i].medium.empty()) {
+            scored[i].candidate.url = scored[i].medium;
+            scored[i].candidate.size = scored[i].mediumSize;
+        }
+    }
+    for (auto& t : probes) {
+        t.join();
+    }
+
+    for (const auto& sc : scored) {
+        result.candidates.push_back(sc.candidate);
     }
 
     INFO("Download lookup for {} ({} s): {} entries", vdrChannel, duration, result.candidates.size());
