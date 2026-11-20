@@ -586,6 +586,12 @@ std::vector<std::string> inputOptions(const DownloadSource& source) {
     }
 
     addNetworkOptions(options, source.url);
+
+    // a download survives a longer interruption of the network than the playback
+    if (source.url.rfind("http://", 0) == 0 || source.url.rfind("https://", 0) == 0) {
+        options.insert(options.end(), { "-reconnect_on_network_error", "1", "-reconnect_delay_max", "30" });
+    }
+
     return options;
 }
 
