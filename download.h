@@ -22,16 +22,22 @@ namespace downloads {
 void setup(const std::string& directory, const std::string& mediathekUrl);
 
 // the entries of MediathekView with the duration of the current video
-remotetranscoder::DownloadLookupResult lookup(const std::string& channel, const DownloadSource& source);
+remotetranscoder::DownloadLookupResult lookup(const remotetranscoder::DownloadLookupType& input, const DownloadSource& source);
 
 // url empty: the stream of the last lookup. maxRate in kbit/s, 0: unlimited.
 // Returns an error, empty if started.
-std::string start(const std::string& url, const std::string& name, int duration, int maxRate);
+std::string start(const remotetranscoder::DownloadStartType& input);
 
 std::vector<remotetranscoder::DownloadInfo> list();
 
 // cancel a running download, forget a failed one or delete a file
 bool remove(const std::string& id);
+
+// start a failed or interrupted download again, returns an error
+std::string retry(const std::string& id);
+
+// convert a MP4 file to TS, returns an error
+std::string convert(const std::string& id, int reserve);
 
 // stop all running downloads
 void shutdown();

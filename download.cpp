@@ -562,7 +562,8 @@ void setup(const std::string& dir, const std::string& url) {
     }
 }
 
-DownloadLookupResult lookup(const std::string& vdrChannel, const DownloadSource& source) {
+DownloadLookupResult lookup(const DownloadLookupType& input, const DownloadSource& source) {
+    const std::string& vdrChannel = input.channel;
     DownloadLookupResult result;
     result.stream = false;
 
@@ -695,7 +696,12 @@ DownloadLookupResult lookup(const std::string& vdrChannel, const DownloadSource&
     return result;
 }
 
-std::string start(const std::string& url, const std::string& name, int duration, int maxRate) {
+std::string start(const DownloadStartType& input) {
+    const std::string& url = input.url;
+    const std::string& name = input.name;
+    int duration = input.duration;
+    int maxRate = input.maxRate;
+
     DownloadSource source;
     if (url.empty()) {
         std::lock_guard<std::mutex> lock(mutex);
@@ -854,6 +860,14 @@ bool remove(const std::string& id) {
     }
 
     return true;
+}
+
+std::string retry(const std::string&) {
+    return "Not supported";
+}
+
+std::string convert(const std::string&, int) {
+    return "Not supported";
 }
 
 void shutdown() {

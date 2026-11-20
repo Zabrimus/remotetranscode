@@ -40,6 +40,8 @@ public:
     void DownloadStart(std::string& _return, const DownloadStartType& input) override;
     void DownloadList(std::vector<DownloadInfo>& _return) override;
     bool DownloadRemove(const DownloadRemoveType& input) override;
+    void DownloadRetry(std::string& _return, const DownloadRetryType& input) override;
+    void DownloadConvert(std::string& _return, const DownloadConvertType& input) override;
 };
 
 class RemoteTranscoderCloneFactory : virtual public RemoteTranscoderIfFactory {

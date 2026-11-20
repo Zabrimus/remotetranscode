@@ -291,11 +291,11 @@ void RemoteTranscoderServer::DownloadLookup(DownloadLookupResult &_return, const
     }
 
     // the query of MediathekView takes a while, no lock
-    _return = downloads::lookup(input.channel, source);
+    _return = downloads::lookup(input, source);
 }
 
 void RemoteTranscoderServer::DownloadStart(std::string &_return, const DownloadStartType &input) {
-    _return = downloads::start(input.url, input.name, input.duration, input.maxRate);
+    _return = downloads::start(input);
 }
 
 void RemoteTranscoderServer::DownloadList(std::vector<DownloadInfo> &_return) {
@@ -304,6 +304,14 @@ void RemoteTranscoderServer::DownloadList(std::vector<DownloadInfo> &_return) {
 
 bool RemoteTranscoderServer::DownloadRemove(const DownloadRemoveType &input) {
     return downloads::remove(input.id);
+}
+
+void RemoteTranscoderServer::DownloadRetry(std::string &_return, const DownloadRetryType &input) {
+    _return = downloads::retry(input.id);
+}
+
+void RemoteTranscoderServer::DownloadConvert(std::string &_return, const DownloadConvertType &input) {
+    _return = downloads::convert(input.id, input.reserve);
 }
 
 RemoteTranscoderIf *RemoteTranscoderCloneFactory::getHandler(const TConnectionInfo &connInfo) {
