@@ -41,7 +41,10 @@ struct Download {
     int progress = 0;
     pid_t pid = 0;
     bool cancelled = false;
+    bool interrupted = false;           // stopped by the end of the program
     std::chrono::steady_clock::time_point cancelTime;
+    DownloadStartType params;           // to start it again, the data of a recording
+    DownloadSource source;
 };
 
 std::mutex mutex;
@@ -398,15 +401,113 @@ bool writable(const std::string& dir) {
     return true;
 }
 
+// The data of a download in a hidden file next to it: the information of a
+// finished file, and a failed or interrupted download can be started again.
+std::string sidecar(const std::string& file) {
+    return directory + "/." + file + ".json";
+}
+
+void writeSidecar(const Download& d, const std::string& state) {
+    json j;
+    j["state"] = state;
+    j["error"] = d.error;
+    j["format"] = d.params.format;
+    j["duration"] = d.duration;
+    j["maxRate"] = d.params.maxRate;
+    j["topic"] = d.params.topic;
+    j["title"] = d.params.title;
+    j["channel"] = d.params.channel;
+    j["timestamp"] = d.params.timestamp;
+    j["description"] = d.params.description;
+    j["width"] = d.params.width;
+    j["height"] = d.params.height;
+    j["url"] = d.source.url;
+    j["cookies"] = d.source.cookies;
+    j["referer"] = d.source.referer;
+    j["userAgent"] = d.source.userAgent;
+    j["maps"] = d.source.maps;
+
+    std::string file = sidecar(d.name);
+    FILE *f = fopen((file + ".tmp").c_str(), "w");
+    if (f == nullptr) {
+        ERROR("Unable to write {}: {}", file, strerror(errno));
+        return;
+    }
+    std::string text = j.dump(2);
+    bool ok = fwrite(text.data(), 1, text.size(), f) == text.size();
+    ok = fclose(f) == 0 && ok;
+
+    std::error_code ec;
+    if (ok) {
+        fs::rename(file + ".tmp", file, ec);
+    } else {
+        fs::remove(file + ".tmp", ec);
+    }
+}
+
+// the download of a file with its sidecar, the state of the sidecar
+std::shared_ptr<Download> readSidecar(const std::string& file, std::string& state) {
+    FILE *f = fopen(sidecar(file).c_str(), "r");
+    if (f == nullptr) {
+        return nullptr;
+    }
+
+    std::string text;
+    char buf[4096];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
+        text.append(buf, n);
+    }
+    fclose(f);
+
+    try {
+        auto j = json::parse(text);
+        auto d = std::make_shared<Download>();
+        d->name = file;
+        state = j.value("state", "");
+        d->error = j.value("error", "");
+        d->duration = j.value("duration", 0.0);
+        d->params.name = file;
+        d->params.format = j.value("format", "");
+        d->params.duration = (int) d->duration;
+        d->params.maxRate = j.value("maxRate", 0);
+        d->params.topic = j.value("topic", "");
+        d->params.title = j.value("title", "");
+        d->params.channel = j.value("channel", "");
+        d->params.timestamp = j.value("timestamp", (int64_t) 0);
+        d->params.description = j.value("description", "");
+        d->params.width = j.value("width", 0);
+        d->params.height = j.value("height", 0);
+        d->source.url = j.value("url", "");
+        d->source.cookies = j.value("cookies", "");
+        d->source.referer = j.value("referer", "");
+        d->source.userAgent = j.value("userAgent", "");
+        d->source.maps = j.value("maps", std::vector<std::string>());
+        d->source.duration = d->duration;
+        return d;
+    } catch (const std::exception& e) {
+        ERROR("Unable to read {}: {}", sidecar(file), e.what());
+        return nullptr;
+    }
+}
+
 void finish(const std::shared_ptr<Download>& d, int exitStatus, const std::string& lastError) {
     std::string part = directory + "/" + d->name + ".part";
     std::error_code ec;
 
     std::lock_guard<std::mutex> lock(mutex);
 
-    if (d->cancelled) {
+    if (d->interrupted) {
+        // started again at the next start of the program
+        INFO("Download {} interrupted", d->name);
+        fs::remove(part, ec);
+        d->state = "failed";
+        d->error = "Interrupted";
+        writeSidecar(*d, "failed");
+    } else if (d->cancelled) {
         INFO("Download {} cancelled", d->name);
         fs::remove(part, ec);
+        fs::remove(sidecar(d->name), ec);
         active.erase(d->id);
     } else if (exitStatus == 0) {
         fs::rename(part, directory + "/" + d->name, ec);
@@ -414,8 +515,11 @@ void finish(const std::shared_ptr<Download>& d, int exitStatus, const std::strin
             ERROR("Download {}: unable to rename the file: {}", d->name, ec.message());
             d->state = "failed";
             d->error = ec.message();
+            writeSidecar(*d, "failed");
         } else {
             INFO("Download {} finished", d->name);
+            d->progress = 100;
+            writeSidecar(*d, "done");
             active.erase(d->id);
         }
     } else {
@@ -423,6 +527,7 @@ void finish(const std::shared_ptr<Download>& d, int exitStatus, const std::strin
         fs::remove(part, ec);
         d->state = "failed";
         d->error = lastError.empty() ? "ffmpeg exit code " + std::to_string(exitStatus) : lastError;
+        writeSidecar(*d, "failed");
     }
 
     --running;
@@ -590,7 +695,10 @@ int64_t bitrate(const DownloadSource& source) {
     return videoInfo(source, 0).bitrate;
 }
 
-void run(const std::shared_ptr<Download>& d, std::vector<std::string> cmd, const DownloadSource& source, int maxRate) {
+void run(const std::shared_ptr<Download>& d, std::vector<std::string> cmd) {
+    const DownloadSource& source = d->source;
+    int maxRate = d->params.maxRate;
+
     std::string out;            // incomplete line of the progress
     std::string lastError;
     std::mutex errorMutex;
@@ -688,6 +796,49 @@ void run(const std::shared_ptr<Download>& d, std::vector<std::string> cmd, const
     finish(d, exitStatus, error);
 }
 
+// the part file is created at once: a failure is reported now, not later in the list
+std::string launch(const std::shared_ptr<Download>& d) {
+    const DownloadSource& source = d->source;
+
+    std::vector<std::string> cmd = { "ffmpeg", "-hide_banner", "-nostdin", "-nostats", "-loglevel", "error", "-y" };
+    auto options = inputOptions(source);
+    cmd.insert(cmd.end(), options.begin(), options.end());
+    cmd.emplace_back("-i");
+    cmd.emplace_back(source.url);
+
+    // the streams of the playback, else ffmpeg chooses the best video and audio
+    for (const auto& m : source.maps) {
+        cmd.emplace_back("-map");
+        cmd.emplace_back(m);
+    }
+
+    cmd.insert(cmd.end(), { "-c", "copy", "-f", "mp4", "-movflags", "+faststart", "-progress", "pipe:1" });
+
+    std::string part = directory + "/" + d->name + ".part";
+    int fd = ::open(part.c_str(), O_CREAT | O_EXCL | O_WRONLY, 0644);
+    if (fd < 0) {
+        ERROR("Unable to create {}: {}", part, strerror(errno));
+        return "The download directory is not writable";
+    }
+    ::close(fd);
+
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        d->state = "running";
+        d->error.clear();
+        d->progress = 0;
+        d->cancelled = false;
+        writeSidecar(*d, "running");
+        ++running;
+    }
+
+    cmd.emplace_back(part);
+    INFO("Download {} from {}", d->name, source.url);
+
+    std::thread(run, d, cmd).detach();
+    return "";
+}
+
 }
 
 void setup(const std::string& dir, const std::string& url) {
@@ -709,9 +860,29 @@ void setup(const std::string& dir, const std::string& url) {
         ERROR("Unable to create the download directory {}: {}", directory, ec.message());
     }
 
-    // left over by a crash or power loss
+    // Downloads of the last run: an interrupted download is listed as failed.
+    // A part file without data is left over by a crash or power loss.
     for (const auto& entry : fs::directory_iterator(directory, ec)) {
-        if (entry.is_regular_file() && endsWith(entry.path().filename().string(), ".mp4.part")) {
+        std::string file = entry.path().filename().string();
+        if (file.size() > 6 && file[0] == '.' && endsWith(file, ".json")) {
+            std::string name = file.substr(1, file.size() - 6);
+            std::string state;
+            auto d = readSidecar(name, state);
+            if (d == nullptr || (state == "done" && !fs::exists(directory + "/" + name, ec))) {
+                fs::remove(entry.path(), ec);
+            } else if (state == "running" || state == "failed") {
+                INFO("Download {}: {}", name, state == "running" ? "interrupted" : d->error);
+                d->id = std::to_string(nextId++);
+                d->state = "failed";
+                d->error = state == "running" ? "Interrupted" : d->error;
+                writeSidecar(*d, "failed");
+                active[d->id] = d;
+            }
+        }
+    }
+
+    for (const auto& entry : fs::directory_iterator(directory, ec)) {
+        if (entry.is_regular_file() && endsWith(entry.path().filename().string(), ".part")) {
             INFO("Remove the incomplete download {}", entry.path().string());
             fs::remove(entry.path(), ec);
         }
@@ -1012,45 +1183,24 @@ DownloadLookupResult lookup(const DownloadLookupType& input, const DownloadSourc
 }
 
 std::string start(const DownloadStartType& input) {
-    const std::string& url = input.url;
-    const std::string& name = input.name;
-    int duration = input.duration;
-    int maxRate = input.maxRate;
-
-    DownloadSource source;
-    if (url.empty()) {
-        std::lock_guard<std::mutex> lock(mutex);
-        source = lastSource;
-    } else {
-        source.url = url;
-        source.duration = duration;
-    }
-
-    if (source.url.empty()) {
-        return "This video can't be downloaded";
-    }
-
-    if (source.url.rfind("http://", 0) != 0 && source.url.rfind("https://", 0) != 0) {
-        return "This video can't be downloaded";
-    }
-
     auto d = std::make_shared<Download>();
-
-    std::vector<std::string> cmd = { "ffmpeg", "-hide_banner", "-nostdin", "-nostats", "-loglevel", "error", "-y" };
-    auto options = inputOptions(source);
-    cmd.insert(cmd.end(), options.begin(), options.end());
-    cmd.emplace_back("-i");
-    cmd.emplace_back(source.url);
-
-    // the streams of the playback, else ffmpeg chooses the best video and audio
-    for (const auto& m : source.maps) {
-        cmd.emplace_back("-map");
-        cmd.emplace_back(m);
+    d->params = input;
+    if (d->params.format.empty()) {
+        d->params.format = "mp4";
     }
 
-    cmd.insert(cmd.end(), { "-c", "copy", "-f", "mp4", "-movflags", "+faststart", "-progress", "pipe:1" });
+    if (input.url.empty()) {
+        std::lock_guard<std::mutex> lock(mutex);
+        d->source = lastSource;
+    } else {
+        d->source.url = input.url;
+        d->source.duration = input.duration;
+    }
 
-    std::string part;
+    if (d->source.url.rfind("http://", 0) != 0 && d->source.url.rfind("https://", 0) != 0) {
+        return "This video can't be downloaded";
+    }
+
     {
         std::lock_guard<std::mutex> lock(mutex);
         if (directory.empty()) {
@@ -1058,33 +1208,19 @@ std::string start(const DownloadStartType& input) {
         }
 
         d->id = std::to_string(nextId++);
-        d->name = uniqueName(name);
+        d->name = uniqueName(input.name);
+        d->duration = d->source.duration;
         d->state = "running";
-        d->duration = source.duration;
-        part = directory + "/" + d->name + ".part";
         active[d->id] = d;
     }
 
-    // a failure is reported at once, not later by ffmpeg in the list
-    int fd = ::open(part.c_str(), O_CREAT | O_EXCL | O_WRONLY, 0644);
-    if (fd < 0) {
-        ERROR("Unable to create {}: {}", part, strerror(errno));
+    std::string error = launch(d);
+    if (!error.empty()) {
         std::lock_guard<std::mutex> lock(mutex);
         active.erase(d->id);
-        return "The download directory is not writable";
-    }
-    ::close(fd);
-
-    {
-        std::lock_guard<std::mutex> lock(mutex);
-        ++running;
     }
 
-    cmd.emplace_back(part);
-    INFO("Download {} from {}", d->name, source.url);
-
-    std::thread(run, d, cmd, source, maxRate).detach();
-    return "";
+    return error;
 }
 
 std::vector<DownloadInfo> list() {
@@ -1096,6 +1232,18 @@ std::vector<DownloadInfo> list() {
         return result;
     }
 
+    auto fill = [](DownloadInfo& info, const Download& d) {
+        info.format = d.params.format.empty() ? "mp4" : d.params.format;
+        info.topic = d.params.topic;
+        info.title = d.params.title;
+        info.channel = d.params.channel;
+        info.timestamp = d.params.timestamp;
+        info.description = d.params.description;
+        info.duration = (int) d.duration;
+        info.width = d.params.width;
+        info.height = d.params.height;
+    };
+
     for (const auto& kv : active) {
         const auto& d = kv.second;
         DownloadInfo info;
@@ -1106,6 +1254,7 @@ std::vector<DownloadInfo> list() {
         info.error = d->error;
         auto size = fs::file_size(directory + "/" + d->name + ".part", ec);
         info.size = ec ? 0 : (int64_t) size;
+        fill(info, *d);
         result.push_back(info);
     }
 
@@ -1121,8 +1270,17 @@ std::vector<DownloadInfo> list() {
         info.name = file;
         info.state = "done";
         info.progress = 100;
+        info.path = entry.path().string();
         auto size = entry.file_size(ec);
         info.size = ec ? 0 : (int64_t) size;
+
+        std::string state;
+        auto d = readSidecar(file, state);
+        if (d != nullptr) {
+            fill(info, *d);
+        }
+        info.format = "mp4";
+
         files.emplace_back(entry.last_write_time(ec), info);
     }
 
@@ -1150,6 +1308,7 @@ bool remove(const std::string& id) {
         std::error_code ec;
         bool removed = fs::remove(directory + "/" + file, ec);
         INFO("Delete download {}: {}", file, removed ? "ok" : ec.message());
+        fs::remove(sidecar(file), ec);
         return removed;
     }
 
@@ -1171,14 +1330,34 @@ bool remove(const std::string& id) {
             }
         }
     } else {
+        std::error_code ec;
+        fs::remove(sidecar(d->name), ec);
         active.erase(it);
     }
 
     return true;
 }
 
-std::string retry(const std::string&) {
-    return "Not supported";
+std::string retry(const std::string& id) {
+    std::shared_ptr<Download> d;
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        auto it = active.find(id);
+        if (it == active.end() || it->second->state != "failed") {
+            return "This video can't be downloaded";
+        }
+        d = it->second;
+        d->state = "running";
+    }
+
+    std::string error = launch(d);
+    if (!error.empty()) {
+        std::lock_guard<std::mutex> lock(mutex);
+        d->state = "failed";
+        d->error = error;
+    }
+
+    return error;
 }
 
 std::string convert(const std::string&, int) {
@@ -1192,6 +1371,7 @@ void shutdown() {
         const auto& d = kv.second;
         if (d->state == "running" && !d->cancelled) {
             d->cancelled = true;
+            d->interrupted = true;
             d->cancelTime = std::chrono::steady_clock::now();
             if (d->pid > 0) {
                 ::kill(d->pid, SIGTERM);
