@@ -44,6 +44,7 @@ struct Download {
     bool cancelled = false;
     bool interrupted = false;           // stopped by the end of the program
     bool noSpace = false;               // stopped, the disk is full
+    std::string convertFrom;            // the MP4 file of a conversion, deleted at the end
     std::chrono::steady_clock::time_point cancelTime;
     DownloadStartType params;           // to start it again, the data of a recording
     DownloadSource source;
@@ -372,12 +373,12 @@ std::string candidateName(const std::string& channel, const std::string& topic, 
 }
 
 // a name for the file that isn't used yet, called with the mutex locked
-std::string uniqueName(const std::string& name) {
+std::string uniqueName(const std::string& name, const std::string& extension) {
     std::string base = fileName(name);
 
     for (int i = 1; ; ++i) {
         std::string candidate = i == 1 ? base : base + " (" + std::to_string(i) + ")";
-        std::string file = candidate + ".mp4";
+        std::string file = candidate + extension;
 
         bool used = fs::exists(directory + "/" + file) || fs::exists(directory + "/" + file + ".part");
         for (const auto& d : active) {
@@ -388,6 +389,11 @@ std::string uniqueName(const std::string& name) {
             return file;
         }
     }
+}
+
+// a downloaded file of the directory
+bool validFile(const std::string& file) {
+    return !file.empty() && file[0] != '.' && file.find('/') == std::string::npos && (endsWith(lower(file), ".mp4") || endsWith(lower(file), ".ts"));
 }
 
 // CIFS and NFS may deny root what the mode bits allow: try it
@@ -439,6 +445,7 @@ void writeSidecar(const Download& d, const std::string& state) {
     j["referer"] = d.source.referer;
     j["userAgent"] = d.source.userAgent;
     j["maps"] = d.source.maps;
+    j["convertFrom"] = d.convertFrom;
 
     std::string file = sidecar(d.name);
     FILE *f = fopen((file + ".tmp").c_str(), "w");
@@ -497,6 +504,7 @@ std::shared_ptr<Download> readSidecar(const std::string& file, std::string& stat
         d->source.userAgent = j.value("userAgent", "");
         d->source.maps = j.value("maps", std::vector<std::string>());
         d->source.duration = d->duration;
+        d->convertFrom = j.value("convertFrom", "");
         return d;
     } catch (const std::exception& e) {
         ERROR("Unable to read {}: {}", sidecar(file), e.what());
@@ -536,10 +544,15 @@ void finish(const std::shared_ptr<Download>& d, int exitStatus, const std::strin
             d->error = ec.message();
             writeSidecar(*d, "failed");
         } else {
-            INFO("Download {} finished", d->name);
+            INFO("{} {} finished", d->convertFrom.empty() ? "Download" : "Conversion", d->name);
             d->progress = 100;
             writeSidecar(*d, "done");
             active.erase(d->id);
+
+            if (!d->convertFrom.empty()) {
+                fs::remove(directory + "/" + d->convertFrom, ec);
+                fs::remove(sidecar(d->convertFrom), ec);
+            }
         }
     } else {
         ERROR("Download {} failed with exit code {}: {}", d->name, exitStatus, lastError);
@@ -852,10 +865,14 @@ std::string launch(const std::shared_ptr<Download>& d) {
         cmd.emplace_back(m);
     }
 
-    cmd.insert(cmd.end(), { "-c", "copy", "-f", "mp4", "-movflags", "+faststart", "-progress", "pipe:1" });
+    if (d->params.format == "ts") {
+        cmd.insert(cmd.end(), { "-c", "copy", "-f", "mpegts", "-progress", "pipe:1" });
+    } else {
+        cmd.insert(cmd.end(), { "-c", "copy", "-f", "mp4", "-movflags", "+faststart", "-progress", "pipe:1" });
+    }
 
-    // the reserve and the estimated size must be free
-    if (d->params.reserve > 0) {
+    // the reserve and the estimated size must be free, a conversion is checked before
+    if (d->params.reserve > 0 && d->convertFrom.empty()) {
         int64_t estimate = bitrate(source) * (int64_t) d->duration / 8;
         int64_t free = freeBytes(directory);
         if (free >= 0 && free < (int64_t) d->params.reserve * 1024 * 1024 + estimate) {
@@ -890,7 +907,7 @@ std::string launch(const std::shared_ptr<Download>& d) {
             return "";
         }
 
-        d->state = "running";
+        d->state = d->convertFrom.empty() ? "running" : "converting";
         d->error.clear();
         d->progress = 0;
         d->cancelled = false;
@@ -900,7 +917,7 @@ std::string launch(const std::shared_ptr<Download>& d) {
     }
 
     cmd.emplace_back(part);
-    INFO("Download {} from {}", d->name, source.url);
+    INFO("{} {} from {}", d->convertFrom.empty() ? "Download" : "Conversion", d->name, source.url);
 
     std::thread(run, d, cmd).detach();
     return "";
@@ -1317,7 +1334,7 @@ std::string start(const DownloadStartType& input) {
         }
 
         d->id = std::to_string(nextId++);
-        d->name = uniqueName(input.name);
+        d->name = uniqueName(input.name, d->params.format == "ts" ? ".ts" : ".mp4");
         d->duration = d->source.duration;
         active[d->id] = d;
 
@@ -1383,7 +1400,7 @@ std::vector<DownloadInfo> list() {
     std::vector<std::pair<fs::file_time_type, DownloadInfo>> files;
     for (const auto& entry : fs::directory_iterator(directory, ec)) {
         std::string file = entry.path().filename().string();
-        if (!entry.is_regular_file(ec) || !endsWith(lower(file), ".mp4") || file[0] == '.') {
+        if (!entry.is_regular_file(ec) || !validFile(file)) {
             continue;
         }
 
@@ -1401,7 +1418,7 @@ std::vector<DownloadInfo> list() {
         if (d != nullptr) {
             fill(info, *d);
         }
-        info.format = "mp4";
+        info.format = endsWith(lower(file), ".ts") ? "ts" : "mp4";
 
         files.emplace_back(entry.last_write_time(ec), info);
     }
@@ -1423,7 +1440,7 @@ bool remove(const std::string& id) {
 
     if (id.rfind("file:", 0) == 0) {
         std::string file = id.substr(5);
-        if (file.empty() || file[0] == '.' || file.find('/') != std::string::npos || !endsWith(lower(file), ".mp4")) {
+        if (!validFile(file)) {
             return false;
         }
 
@@ -1440,7 +1457,7 @@ bool remove(const std::string& id) {
     }
 
     auto d = it->second;
-    if (d->state == "running" || d->state == "starting") {
+    if (d->state == "running" || d->state == "converting" || d->state == "starting") {
         if (!d->cancelled) {
             d->cancelled = true;
             d->cancelTime = std::chrono::steady_clock::now();
@@ -1482,8 +1499,71 @@ std::string retry(const std::string& id) {
     return "";
 }
 
-std::string convert(const std::string&, int) {
-    return "Not supported";
+std::string convert(const std::string& id, int reserve) {
+    if (id.rfind("file:", 0) != 0) {
+        return "This video can't be converted";
+    }
+
+    std::string file = id.substr(5);
+    if (!validFile(file) || !endsWith(lower(file), ".mp4")) {
+        return "This video can't be converted";
+    }
+
+    auto d = std::make_shared<Download>();
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        if (directory.empty()) {
+            return "No download directory";
+        }
+
+        std::string path = directory + "/" + file;
+        std::error_code ec;
+        auto size = fs::file_size(path, ec);
+        if (ec) {
+            return "This video can't be converted";
+        }
+
+        // the TS file needs about the size of the MP4 file
+        int64_t free = freeBytes(directory);
+        if (free >= 0 && free < (int64_t) size * 105 / 100 + (int64_t) reserve * 1024 * 1024) {
+            return "Not enough disk space";
+        }
+
+        // the data of the download, or an MP4 file of another source
+        std::string state;
+        auto old = readSidecar(file, state);
+        if (old != nullptr) {
+            d->params = old->params;
+            d->duration = old->duration;
+        } else {
+            d->params.title = file.substr(0, file.size() - 4);
+        }
+        if (d->duration <= 0) {
+            DownloadSource s;
+            s.url = path;
+            d->duration = probeDuration(s);
+        }
+
+        d->params.format = "ts";
+        d->params.maxRate = 0;
+        d->params.reserve = reserve;
+        d->source.url = path;
+        d->source.duration = d->duration;
+        d->source.maps = { "0:v?", "0:a?" };
+        d->convertFrom = file;
+        d->id = std::to_string(nextId++);
+        d->name = uniqueName(file.substr(0, file.size() - 4), ".ts");
+        d->state = "starting";
+        active[d->id] = d;
+    }
+
+    std::string error = launch(d);
+    if (!error.empty()) {
+        std::lock_guard<std::mutex> lock(mutex);
+        active.erase(d->id);
+    }
+
+    return error;
 }
 
 void shutdown() {
@@ -1492,7 +1572,7 @@ void shutdown() {
 
     for (const auto& kv : active) {
         const auto& d = kv.second;
-        if (d->state == "running" && !d->cancelled) {
+        if ((d->state == "running" || d->state == "converting") && !d->cancelled) {
             d->cancelled = true;
             d->interrupted = true;
             d->cancelTime = std::chrono::steady_clock::now();
