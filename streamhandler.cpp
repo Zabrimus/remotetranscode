@@ -98,9 +98,10 @@ std::shared_ptr<std::string> StreamHandler::probeVideo(std::string url, std::str
     DEBUG("Create empty video");
     transparentVideoFile = "transparent-video-" + browserIp + "_" + std::to_string(browserPort) + "-" + this->postfix + ".webm";
 
+    std::string transparentPath = movie_path + "/" + transparentVideoFile;
     struct stat sb{};
-    if ((stat(transparentVideoFile.c_str(), &sb) != -1) && (remove(transparentVideoFile.c_str()) != 0)) {
-        ERROR("File {} exists and delete failed. Aborting...\n", transparentVideoFile.c_str());
+    if ((stat(transparentPath.c_str(), &sb) != -1) && (remove(transparentPath.c_str()) != 0)) {
+        ERROR("File {} exists and delete failed. Aborting...", transparentPath);
         return nullptr;
     }
 
