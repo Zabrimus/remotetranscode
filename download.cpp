@@ -7,6 +7,7 @@
 #include <condition_variable>
 #include <cstring>
 #include <fcntl.h>
+#include <sys/statvfs.h>
 #include <unistd.h>
 #include <csignal>
 #include <ctime>
@@ -42,6 +43,7 @@ struct Download {
     pid_t pid = 0;
     bool cancelled = false;
     bool interrupted = false;           // stopped by the end of the program
+    bool noSpace = false;               // stopped, the disk is full
     std::chrono::steady_clock::time_point cancelTime;
     DownloadStartType params;           // to start it again, the data of a recording
     DownloadSource source;
@@ -54,6 +56,8 @@ std::string mediathekUrl;
 std::map<std::string, std::shared_ptr<Download>> active;     // running and failed
 int nextId = 1;
 int running = 0;
+int maxParallel = 0;                    // downloads at the same time, 0: no limit
+bool stopping = false;                  // no more downloads are started
 DownloadSource lastSource;
 
 const int durationTolerance = 3;        // seconds
@@ -401,6 +405,15 @@ bool writable(const std::string& dir) {
     return true;
 }
 
+// free bytes of the file system, -1: unknown
+int64_t freeBytes(const std::string& dir) {
+    struct statvfs st {};
+    if (statvfs(dir.c_str(), &st) != 0) {
+        return -1;
+    }
+    return (int64_t) st.f_bavail * (int64_t) st.f_frsize;
+}
+
 // The data of a download in a hidden file next to it: the information of a
 // finished file, and a failed or interrupted download can be started again.
 std::string sidecar(const std::string& file) {
@@ -497,7 +510,13 @@ void finish(const std::shared_ptr<Download>& d, int exitStatus, const std::strin
 
     std::lock_guard<std::mutex> lock(mutex);
 
-    if (d->interrupted) {
+    if (d->noSpace) {
+        ERROR("Download {}: not enough disk space", d->name);
+        fs::remove(part, ec);
+        d->state = "failed";
+        d->error = "Not enough disk space";
+        writeSidecar(*d, "failed");
+    } else if (d->interrupted) {
         // started again at the next start of the program
         INFO("Download {} interrupted", d->name);
         fs::remove(part, ec);
@@ -533,6 +552,8 @@ void finish(const std::shared_ptr<Download>& d, int exitStatus, const std::strin
     --running;
     finished.notify_all();
 }
+
+void startQueued();
 
 // referer, user agent, cookies and timeouts of the input, for ffmpeg and ffprobe
 std::vector<std::string> inputOptions(const DownloadSource& source) {
@@ -755,6 +776,7 @@ void run(const std::shared_ptr<Download>& d, std::vector<std::string> cmd) {
 
     if (process.get_id() <= 0) {
         finish(d, -1, "ffmpeg can't be started");
+        startQueued();
         return;
     }
 
@@ -771,10 +793,27 @@ void run(const std::shared_ptr<Download>& d, std::vector<std::string> cmd) {
     // a cancelled download gets SIGTERM, if ffmpeg doesn't stop SIGKILL
     int exitStatus;
     bool killed = false;
+    int64_t reserve = (int64_t) d->params.reserve * 1024 * 1024;
+    auto lastCheck = std::chrono::steady_clock::now();
+
     while (!process.try_get_exit_status(exitStatus)) {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
+        // the disk becomes full: stop
+        int64_t free = -1;
+        if (reserve > 0 && std::chrono::steady_clock::now() - lastCheck > std::chrono::seconds(5)) {
+            lastCheck = std::chrono::steady_clock::now();
+            free = freeBytes(directory);
+        }
+
         std::lock_guard<std::mutex> lock(mutex);
+        if (free >= 0 && free < reserve && !d->cancelled) {
+            d->noSpace = true;
+            d->cancelled = true;
+            d->cancelTime = std::chrono::steady_clock::now();
+            ::kill(d->pid, SIGTERM);
+            ::kill(-d->pid, SIGTERM);
+        }
         if (d->cancelled && !killed && std::chrono::steady_clock::now() - d->cancelTime > std::chrono::seconds(5)) {
             ::kill(-d->pid, SIGKILL);
             ::kill(d->pid, SIGKILL);
@@ -794,6 +833,7 @@ void run(const std::shared_ptr<Download>& d, std::vector<std::string> cmd) {
     }
 
     finish(d, exitStatus, error);
+    startQueued();
 }
 
 // the part file is created at once: a failure is reported now, not later in the list
@@ -814,6 +854,16 @@ std::string launch(const std::shared_ptr<Download>& d) {
 
     cmd.insert(cmd.end(), { "-c", "copy", "-f", "mp4", "-movflags", "+faststart", "-progress", "pipe:1" });
 
+    // the reserve and the estimated size must be free
+    if (d->params.reserve > 0) {
+        int64_t estimate = bitrate(source) * (int64_t) d->duration / 8;
+        int64_t free = freeBytes(directory);
+        if (free >= 0 && free < (int64_t) d->params.reserve * 1024 * 1024 + estimate) {
+            ERROR("Download {}: {} MB free, {} MB needed", d->name, free / 1048576, d->params.reserve + estimate / 1048576);
+            return "Not enough disk space";
+        }
+    }
+
     std::string part = directory + "/" + d->name + ".part";
     int fd = ::open(part.c_str(), O_CREAT | O_EXCL | O_WRONLY, 0644);
     if (fd < 0) {
@@ -824,10 +874,27 @@ std::string launch(const std::shared_ptr<Download>& d) {
 
     {
         std::lock_guard<std::mutex> lock(mutex);
+
+        // cancelled while it started
+        if (d->cancelled || stopping) {
+            std::error_code ec;
+            fs::remove(part, ec);
+            if (d->cancelled) {
+                fs::remove(sidecar(d->name), ec);
+                active.erase(d->id);
+            } else {
+                d->state = "failed";
+                d->error = "Interrupted";
+                writeSidecar(*d, "failed");
+            }
+            return "";
+        }
+
         d->state = "running";
         d->error.clear();
         d->progress = 0;
         d->cancelled = false;
+        d->noSpace = false;
         writeSidecar(*d, "running");
         ++running;
     }
@@ -837,6 +904,48 @@ std::string launch(const std::shared_ptr<Download>& d) {
 
     std::thread(run, d, cmd).detach();
     return "";
+}
+
+// queued downloads, as many as may run at the same time
+void startQueued() {
+    std::vector<std::shared_ptr<Download>> next;
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        if (stopping) {
+            return;
+        }
+
+        std::vector<std::shared_ptr<Download>> queued;
+        int starting = 0;
+        for (const auto& kv : active) {
+            if (kv.second->state == "queued") {
+                queued.push_back(kv.second);
+            } else if (kv.second->state == "starting") {
+                ++starting;
+            }
+        }
+
+        std::sort(queued.begin(), queued.end(), [](const auto& a, const auto& b) { return std::stoi(a->id) < std::stoi(b->id); });
+
+        for (const auto& d : queued) {
+            if (maxParallel > 0 && running + starting >= maxParallel) {
+                break;
+            }
+            d->state = "starting";
+            ++starting;
+            next.push_back(d);
+        }
+    }
+
+    for (const auto& d : next) {
+        std::string error = launch(d);
+        if (!error.empty()) {
+            std::lock_guard<std::mutex> lock(mutex);
+            d->state = "failed";
+            d->error = error;
+            writeSidecar(*d, "failed");
+        }
+    }
 }
 
 }
@@ -870,11 +979,11 @@ void setup(const std::string& dir, const std::string& url) {
             auto d = readSidecar(name, state);
             if (d == nullptr || (state == "done" && !fs::exists(directory + "/" + name, ec))) {
                 fs::remove(entry.path(), ec);
-            } else if (state == "running" || state == "failed") {
-                INFO("Download {}: {}", name, state == "running" ? "interrupted" : d->error);
+            } else if (state == "running" || state == "queued" || state == "failed") {
+                INFO("Download {}: {}", name, state == "failed" ? d->error : "interrupted");
                 d->id = std::to_string(nextId++);
                 d->state = "failed";
-                d->error = state == "running" ? "Interrupted" : d->error;
+                d->error = state == "failed" ? d->error : "Interrupted";
                 writeSidecar(*d, "failed");
                 active[d->id] = d;
             }
@@ -1210,8 +1319,21 @@ std::string start(const DownloadStartType& input) {
         d->id = std::to_string(nextId++);
         d->name = uniqueName(input.name);
         d->duration = d->source.duration;
-        d->state = "running";
         active[d->id] = d;
+
+        // more downloads wait
+        maxParallel = std::max(0, input.maxParallel);
+        int starting = 0;
+        for (const auto& kv : active) {
+            starting += kv.second->state == "starting" ? 1 : 0;
+        }
+        if (maxParallel > 0 && running + starting >= maxParallel) {
+            INFO("Download {} queued", d->name);
+            d->state = "queued";
+            writeSidecar(*d, "queued");
+            return "";
+        }
+        d->state = "starting";
     }
 
     std::string error = launch(d);
@@ -1249,7 +1371,7 @@ std::vector<DownloadInfo> list() {
         DownloadInfo info;
         info.id = d->id;
         info.name = d->name;
-        info.state = d->state;
+        info.state = d->state == "starting" ? "queued" : d->state;
         info.progress = d->progress;
         info.error = d->error;
         auto size = fs::file_size(directory + "/" + d->name + ".part", ec);
@@ -1318,7 +1440,7 @@ bool remove(const std::string& id) {
     }
 
     auto d = it->second;
-    if (d->state == "running") {
+    if (d->state == "running" || d->state == "starting") {
         if (!d->cancelled) {
             d->cancelled = true;
             d->cancelTime = std::chrono::steady_clock::now();
@@ -1347,17 +1469,17 @@ std::string retry(const std::string& id) {
             return "This video can't be downloaded";
         }
         d = it->second;
-        d->state = "running";
+        d->state = "queued";
+        d->error.clear();
+        d->cancelled = false;
+        d->noSpace = false;
+        d->interrupted = false;
+        writeSidecar(*d, "queued");
     }
 
-    std::string error = launch(d);
-    if (!error.empty()) {
-        std::lock_guard<std::mutex> lock(mutex);
-        d->state = "failed";
-        d->error = error;
-    }
-
-    return error;
+    // an error is shown in the list
+    startQueued();
+    return "";
 }
 
 std::string convert(const std::string&, int) {
@@ -1366,6 +1488,7 @@ std::string convert(const std::string&, int) {
 
 void shutdown() {
     std::unique_lock<std::mutex> lock(mutex);
+    stopping = true;
 
     for (const auto& kv : active) {
         const auto& d = kv.second;
