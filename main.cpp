@@ -375,9 +375,8 @@ void startServer() {
 bool readConfiguration(const char* configFile) {
     // check at first if configFile really exists
     struct stat path_stat;
-    stat(configFile, &path_stat);
-    if (!S_ISREG(path_stat.st_mode)) {
-        ERROR("[vdrweb] Unable to read config file: %s. Reason: %s", configFile, strerror(errno));
+    if (stat(configFile, &path_stat) != 0 || !S_ISREG(path_stat.st_mode)) {
+        ERROR("Unable to read config file: {}. Reason: {}", configFile, strerror(errno));
         return false;
     }
 
@@ -386,7 +385,7 @@ bool readConfiguration(const char* configFile) {
     auto result = file.read(ini);
 
     if (!result) {
-        ERROR("Unable to read config file: %s", configFile);
+        ERROR("Unable to read config file: {}", configFile);
         return false;
     }
 
@@ -418,7 +417,7 @@ bool readCodecFile(const char* codecFile) {
     auto result = file.read(ini);
 
     if (!result) {
-        ERROR("Unable to read codec file: %s", codecFile);
+        ERROR("Unable to read codec file: {}", codecFile);
         return false;
     }
 
