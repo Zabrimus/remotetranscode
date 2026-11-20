@@ -124,6 +124,10 @@ m3u_stream M3u8Handler::parseM3u() {
         headers.emplace("Cookie", cookies);
     }
 
+    // the defaults of httplib are 5 minutes, the probe holds the lock of all streams
+    cli.set_connection_timeout(5);
+    cli.set_read_timeout(15);
+    cli.set_write_timeout(15);
     cli.set_follow_location(true);
     auto res = cli.Get(path, headers);
 
