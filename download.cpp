@@ -205,6 +205,84 @@ std::set<std::string> urlIds(const std::string& url) {
     return ids;
 }
 
+// IDs that say nothing about the video: resolutions, bitrates, short numbers
+bool genericId(const std::string& id) {
+    bool digits = id.find_first_not_of("0123456789") == std::string::npos;
+    if (digits) {
+        return id.size() < 8;
+    }
+
+    // 1920x1080, 1080p50, 3500k, 128kbit
+    size_t i = 0;
+    while (i < id.size() && std::isdigit((unsigned char) id[i])) {
+        ++i;
+    }
+    std::string rest = id.substr(i);
+    if (i > 0 && (rest == "p" || rest == "k" || rest == "kbit" || rest == "kbps")) {
+        return true;
+    }
+    if (i > 0 && rest.size() > 1 && rest[0] == 'x' && rest.find_first_not_of("0123456789", 1) == std::string::npos) {
+        return true;
+    }
+    if (i > 0 && rest.size() > 1 && rest[0] == 'p' && rest.find_first_not_of("0123456789", 1) == std::string::npos) {
+        return true;
+    }
+
+    return false;
+}
+
+// lower case words of at least 4 letters, UTF-8 characters count as letters
+std::vector<std::string> words(const std::string& text) {
+    std::vector<std::string> result;
+    std::string word;
+
+    auto add = [&]() {
+        if (word.size() >= 4) {
+            result.push_back(lower(word));
+        }
+        word.clear();
+    };
+
+    for (unsigned char c : text) {
+        if (std::isalnum(c) || c >= 0x80) {
+            word += (char) c;
+        } else {
+            add();
+        }
+    }
+    add();
+
+    return result;
+}
+
+// Other versions of a broadcast, they are listed after the normal version.
+// The name is translated by VDR.
+std::string variant(const std::string& topic, const std::string& title) {
+    static const std::vector<std::pair<const char *, const char *>> variants = {
+        { "audiodeskription",     "audio description" },
+        { "(ad)",                 "audio description" },
+        { "hörfassung",           "audio description" },
+        { "gebärdensprache",      "sign language" },
+        { "(dgs)",                "sign language" },
+        { "originalversion",      "original version" },
+        { "originalfassung",      "original version" },
+        { "(ov)",                 "original version" },
+        { "(omu)",                "original version" },
+        { "klare sprache",        "plain language" },
+        { "leichte sprache",      "plain language" },
+        { "trailer",              "trailer" },
+    };
+
+    std::string text = lower(topic + " " + title);
+    for (const auto& v : variants) {
+        if (text.find(v.first) != std::string::npos) {
+            return v.second;
+        }
+    }
+
+    return "";
+}
+
 // numbers of the API may also be strings or null
 int64_t number(const json& e, const char *key) {
     auto it = e.find(key);
@@ -633,15 +711,23 @@ DownloadLookupResult lookup(const DownloadLookupType& input, const DownloadSourc
         return result;
     }
 
-    std::set<std::string> ids = urlIds(source.url);
+    // IDs of the stream, then the IDs of each entry
+    std::set<std::string> ids;
+    for (const auto& id : urlIds(source.url)) {
+        if (!genericId(id)) {
+            ids.insert(id);
+        }
+    }
 
-    struct Scored {
-        double score;
-        int64_t timestamp;
-        DownloadCandidate candidate;
+    struct Entry {
+        const json *e;
+        std::string url;
+        std::set<std::string> matched;      // IDs of the stream
     };
-    std::vector<Scored> scored;
 
+    // the same file is often listed by more ARD broadcasters: keep one,
+    // the one of the channel of the application
+    std::map<std::string, Entry> files;
     for (const auto& kv : entries) {
         const json& e = kv.second;
 
@@ -654,16 +740,69 @@ DownloadLookupResult lookup(const DownloadLookupType& input, const DownloadSourc
             continue;
         }
 
+        Entry entry { &e, url, {} };
+        for (const auto& field : { "url_video", "url_video_hd", "url_video_low", "url_website" }) {
+            for (const auto& id : urlIds(expandUrl(text(e, field), text(e, "url_video")))) {
+                if (ids.count(id) > 0) {
+                    entry.matched.insert(id);
+                }
+            }
+        }
+
+        auto it = files.find(url);
+        if (it == files.end() || (!channel.name.empty() && lower(text(e, "channel")) == lower(channel.name))) {
+            files[url] = entry;
+        }
+    }
+
+    // an ID found in one entry only identifies the video
+    std::map<std::string, int> idCount;
+    for (const auto& f : files) {
+        for (const auto& id : f.second.matched) {
+            ++idCount[id];
+        }
+    }
+
+    // words of the page title, without the names of the application
+    std::set<std::string> titleWords;
+    static const std::set<std::string> stopWords = {
+        "mediathek", "hbbtv", "startseite", "video", "videos", "sendung", "sendungen", "folge", "folgen",
+        "ganze", "live", "erste", "arte", "phoenix", "kika", "funk", "fernsehen", "programm", "suche"
+    };
+    for (const auto& w : words(input.pageTitle)) {
+        if (stopWords.count(w) == 0 && lower(channel.name) != w) {
+            titleWords.insert(w);
+        }
+    }
+
+    struct Scored {
+        double score;
+        int64_t timestamp;
+        DownloadCandidate candidate;
+    };
+    std::vector<Scored> scored;
+
+    for (const auto& f : files) {
+        const json& e = *f.second.e;
+
         DownloadCandidate c;
         c.channel = text(e, "channel");
         c.topic = text(e, "topic");
         c.title = text(e, "title");
         c.duration = (int32_t) number(e, "duration");
         c.timestamp = number(e, "timestamp");
-        c.url = url;
+        c.url = f.second.url;
         c.name = candidateName(c.channel, c.topic, c.title, c.timestamp);
+        c.description = text(e, "description");
+        c.variant = variant(c.topic, c.title);
+        c.exact = false;
+        c.width = 0;
+        c.height = 0;
+        // the size of MediathekView belongs to the medium quality
+        c.size = c.url == text(e, "url_video") ? number(e, "size") : 0;
 
-        double score = -5.0 * std::abs(c.duration - duration);
+        int delta = std::abs(c.duration - duration);
+        double score = -5.0 * delta;
         if (!channel.name.empty() && lower(c.channel) == lower(channel.name)) {
             score += 20;
         } else if (channel.ard && isArd(c.channel)) {
@@ -671,15 +810,41 @@ DownloadLookupResult lookup(const DownloadLookupType& input, const DownloadSourc
         }
 
         // the stream and the file of MediathekView often share an ID
-        for (const auto& field : { "url_video", "url_video_hd", "url_video_low", "url_website" }) {
-            std::string u = expandUrl(text(e, field), text(e, "url_video"));
-            for (const auto& id : urlIds(u)) {
-                if (ids.count(id) > 0) {
-                    score += 100;
-                    break;
-                }
-            }
+        bool unique = false;
+        for (const auto& id : f.second.matched) {
+            unique = unique || idCount[id] == 1;
         }
+        if (unique) {
+            score += 100;
+            c.exact = delta <= 2;
+        } else if (!f.second.matched.empty()) {
+            score += 10;
+        }
+
+        if (!c.variant.empty()) {
+            score -= 30;
+        }
+
+        // the words of the page title in the topic or title
+        std::string haystack = lower(c.topic + " " + c.title);
+        int matches = 0;
+        for (const auto& w : titleWords) {
+            matches += haystack.find(w) != std::string::npos ? 1 : 0;
+        }
+        score += std::min(40, 10 * matches);
+
+        // the broadcast in the EPG of the channel: only decides between otherwise
+        // equal entries, an older video may be searched on purpose
+        double epg = 0;
+        for (const auto& ev : input.epg) {
+            std::string t = lower(ev.title);
+            if (t.size() < 4 || (lower(c.topic) != t && lower(c.title).find(t) == std::string::npos)) {
+                continue;
+            }
+            bool sameTime = c.timestamp > 0 && std::abs(c.timestamp - ev.start) <= 3 * 3600;
+            epg = std::max(epg, sameTime ? 3.0 : 2.0);
+        }
+        score += epg;
 
         scored.push_back({ score, c.timestamp, c });
     }
