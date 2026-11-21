@@ -16,9 +16,11 @@ openssl_dep = dependency('openssl')
 #
 # thrift
 #
-if get_option('vdrsternelec')
-    thrift_dep = dependency('thrift')
-else
+# The subproject is a CMake build, which meson cannot reach through the
+# wrap's '[provide]', so the fallback is spelled out by hand.
+thrift_dep = dependency('thrift', required: false)
+
+if not thrift_dep.found()
     thrift_opts = cmake.subproject_options()
     thrift_opts.add_cmake_defines({'WITH_AS3': 'OFF',
                                    'WITH_QT5': 'OFF',
@@ -41,8 +43,8 @@ endif
 #
 # spdlog
 #
-spdlog_proj = subproject('spdlog')
-spdlog_dep = spdlog_proj.get_variable('spdlog_dep', ['tests=disabled', 'compile_library=true'] )
+spdlog_dep = dependency('spdlog',
+                        default_options: ['tests=disabled', 'compile_library=true'])
 
 #
 # tiny-process-libraryle
