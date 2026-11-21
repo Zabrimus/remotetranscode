@@ -7,6 +7,16 @@ project(
   meson_version: '>=0.56.2',
 )
 
+curl_dep = dependency('libcurl')
+avutil_dep = dependency('libavutil')
+avformat_dep = dependency('libavformat')
+avfilter_dep = dependency('libavfilter')
+avcodec_dep = dependency('libavcodec')
+tinyxml2_dep = dependency('tinyxml2')
+
+dash2ts_dependencies = [curl_dep, avutil_dep, avformat_dep, avfilter_dep, avcodec_dep, tinyxml2_dep]
+dash2ts_compile_args = ['-O3']
+
 inc = include_directories(['src', 'src/mpegts', 'src/addons/kodi-dev-kit/include'])
 lib = static_library('dash2ts',
                      'src/mpegts/common.cpp',
@@ -22,17 +32,9 @@ lib = static_library('dash2ts',
                      'src/demuxpacket.cpp',
                      'src/StringUtils.cpp',
                      'src/xmlhandler.cpp',
-                     include_directories: inc
+                     include_directories: inc,
+                     dependencies: dash2ts_dependencies
                     )
-
-curl_dep = dependency('libcurl')
-avutil_dep = dependency('libavutil')
-avformat_dep = dependency('libavformat')
-avfilter_dep = dependency('libavfilter')
-avcodec_dep = dependency('libavcodec')
-
-dash2ts_dependencies = [curl_dep, avutil_dep, avformat_dep, avfilter_dep, avcodec_dep]
-dash2ts_compile_args = ['-O3']
 
 dash2ts_dep = declare_dependency(
     include_directories: inc,
