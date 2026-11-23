@@ -65,8 +65,8 @@ dash2ts_proj = subproject('dash2ts')
 dash2ts_dep = dash2ts_proj.get_variable('dash2ts_dep')
 
 #
-# install directories: the subdirectory Release of the build folder (default)
-# or the standard directories of the prefix
+# install directories: the standard directories of the prefix (default)
+# or the subdirectory Release of the build folder
 #
 if get_option('release_dir')
     bin_dir = meson.current_build_dir() + '/Release'
