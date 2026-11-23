@@ -43,8 +43,9 @@ endif
 #
 # spdlog
 #
+# static: the shared library of the bundled spdlog doesn't build with its fmt
 spdlog_dep = dependency('spdlog',
-                        default_options: ['tests=disabled', 'compile_library=true'])
+                        default_options: ['tests=disabled', 'compile_library=true', 'default_library=static'])
 
 #
 # tiny-process-libraryle
