@@ -8,11 +8,11 @@ cd build
 meson compile
 meson install
 ```
-The release exists in the subdirectory ```Release``` of the build folder.
+The binaries are installed into the ```bindir``` of the prefix and the movie files into
+```<datadir>/remotetranscode/movie```, e.g. ```/usr/local/share/remotetranscode/movie```.
+Start remotrans with ```-m``` and this directory.
 
-With ```meson setup -Drelease_dir=false build``` the binaries are installed into the ```bindir``` of the prefix
-and the movie files into ```<datadir>/remotetranscode/movie```, e.g. ```/usr/local/share/remotetranscode/movie```.
-Then start remotrans with ```-m``` and this directory.
+With ```meson setup -Drelease_dir=true build``` the release exists in the subdirectory ```Release``` of the build folder instead.
 
 ## Configuration
 A default configuration can be found in folder config: ```sockets.ini```.
@@ -51,11 +51,11 @@ Log entries will be written to stdout/stderr.
 
 ## Test ffmpeg/ffprobe
 It's a good idea, to check if ffmpeg and ffprobe exists and that all necessary libraries exists.
-> cd build/Release
+> cd /usr/local/share/remotetranscode (or build/Release with release_dir)
 >
 > ffprobe movie/transparent-full.webm
 >
-> ffmpeg -i movie/transparent-full.webm -t 10 -codec copy -f webm please_remove_me.mp4
+> ffmpeg -i movie/transparent-full.webm -t 10 -codec copy -f webm /tmp/please_remove_me.mp4
 >
 > rm please_remove_me.mp4
 
